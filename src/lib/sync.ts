@@ -144,14 +144,14 @@ async function runSync() {
   }
   const { data } = await sb.auth.getSession();
   const session = data.session;
+  // Signed out or offline: don't add repeating expenses yet. This phone may not know that the
+  // other one paused, edited or deleted something; they're added on the next successful sync.
   if (!session) {
     store.setSync({ state: 'signed-out', email: undefined });
-    await store.generateRecurring();
     return;
   }
   if (!navigator.onLine) {
     store.setSync({ state: 'offline', email: session.user.email });
-    await store.generateRecurring();
     return;
   }
   store.setSync({ state: 'syncing', email: session.user.email });

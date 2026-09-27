@@ -7,7 +7,7 @@ import { useSyncExternalStore } from 'react';
 import type { Entry, Expense, Person, Recurring, Settings, Settlement } from './types';
 import { SETTINGS_ID, defaultSettings } from './types';
 import { today } from './dates';
-import { dueExpenses } from './recurring';
+import { GENERATED_STAMP, dueExpenses } from './recurring';
 import { rateToBase } from './fx';
 import { openPersistence, type Persistence } from './persist';
 
@@ -210,7 +210,10 @@ class Store {
     const changedIds: string[] = [];
     for (const r of remote) {
       const local = this.entries.get(r.id);
-      if (!local || r.updatedAt > local.updatedAt) {
+      // Two phones can each add the same repeating occurrence (same id and stamp, but perhaps a
+      // different exchange rate); both take the server's copy so they agree.
+      const sameGenerated = local && r.updatedAt === GENERATED_STAMP && local.updatedAt === GENERATED_STAMP;
+      if (!local || r.updatedAt > local.updatedAt || sameGenerated) {
         this.entries.set(r.id, r);
         this.dirty.delete(r.id);
         changedIds.push(r.id);
@@ -269,18 +272,38 @@ class Store {
     this.onDirty?.();
   }
 
-  /** Write any recurring expenses that have fallen due. */
+  /**
+   * Write any recurring expenses that have fallen due. Only call this once the ledger is up to date
+   * with the server (or there is no server), so edits made on the other phone are known.
+   */
   async generateRecurring() {
     await this.ready;
     const settings = this.settings();
     const t = today();
     for (const r of this.getSnapshot().recurring) {
-      const { expenses, generatedUntil } = dueExpenses(r, t, (id) => this.entries.has(id), this.device.me);
-      if (!generatedUntil) continue;
+      const expenses = dueExpenses(r, t, (id) => this.entries.has(id), this.device.me);
+      if (!expenses.length) continue;
       const rate = await rateToBase(r.currency, settings.baseCurrency);
       if (rate == null) continue; // foreign currency and offline with no cached rate – try later
-      this.put(...expenses.map((e) => ({ ...e, rate })), { ...r, generatedUntil });
+      this.putGenerated(expenses.map((e) => ({ ...e, rate })));
     }
+  }
+
+  /**
+   * Add automatically generated entries, keeping their low version stamp (unlike `put`) so a real
+   * edit or delete of the same entry on either phone always beats them. Skips any that exist.
+   */
+  private putGenerated(list: Entry[]) {
+    const ids: string[] = [];
+    for (const e of list) {
+      if (this.entries.has(e.id)) continue;
+      this.entries.set(e.id, { ...e, updatedAt: GENERATED_STAMP });
+      this.dirty.add(e.id);
+      ids.push(e.id);
+    }
+    if (!ids.length) return;
+    this.changed(ids);
+    this.onDirty?.();
   }
 
   /** Change the ledger currency, converting every stored rate so balances stay correct. */

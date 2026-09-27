@@ -12,7 +12,7 @@ export function RecurringView({ open }: { open: (s: SheetState) => void }) {
   const t = today();
 
   const withNext = recurring
-    .map((r) => ({ r, next: r.paused ? null : nextOccurrence(r, t) }))
+    .map((r) => ({ r, next: r.paused ? null : nextOccurrence(r, t, (id) => store.has(id)) }))
     .sort((a, b) => (a.next ?? '9999').localeCompare(b.next ?? '9999'));
 
   const monthlyEstimate = recurring

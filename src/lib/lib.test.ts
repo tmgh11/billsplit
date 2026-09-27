@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { balance, describeBalance, parseMoney, shares } from './money';
-import { occurrences, dueExpenses } from './recurring';
+import {
+  GENERATED_STAMP,
+  addedUntil,
+  dueExpenses,
+  movedOccurrences,
+  nextOccurrence,
+  occurrenceId,
+  occurrences,
+  scheduleChanged,
+  scheduleClashes,
+} from './recurring';
 import { guessCategory, learnRule } from './categories';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise } from './splitwise';
@@ -75,11 +85,59 @@ describe('recurring', () => {
   });
   it('dueExpenses is idempotent via generatedUntil and ids', () => {
     const first = dueExpenses(r, '2026-03-15', () => false, 'tom');
-    expect(first.expenses.map((e) => e.date)).toEqual(['2026-01-31', '2026-02-28']);
-    const second = dueExpenses({ ...r, generatedUntil: first.generatedUntil }, '2026-03-15', () => false, 'tom');
-    expect(second.expenses).toHaveLength(0);
-    const ids = new Set(first.expenses.map((e) => e.id));
-    expect(dueExpenses(r, '2026-03-15', (id) => ids.has(id), 'tom').expenses).toHaveLength(0);
+    expect(first.map((e) => e.date)).toEqual(['2026-01-31', '2026-02-28']);
+    expect(dueExpenses({ ...r, generatedUntil: '2026-02-28' }, '2026-03-15', () => false, 'tom')).toHaveLength(0);
+    const ids = new Set(first.map((e) => e.id));
+    expect(dueExpenses(r, '2026-03-15', (id) => ids.has(id), 'tom')).toHaveLength(0);
+  });
+  it('generated occurrences carry the lowest stamp, so any real edit or delete beats them', () => {
+    const [e] = dueExpenses(r, '2026-02-01', () => false, 'nuria');
+    expect(e.updatedAt).toBe(GENERATED_STAMP);
+    expect(GENERATED_STAMP).toBeLessThan(Date.now());
+  });
+  describe('moving a schedule after this period was added', () => {
+    const rent: Recurring = { ...r, id: 'rent', startDate: '2026-07-01' };
+    const sep1 = exp({ id: occurrenceId('rent', '2026-09-01'), date: '2026-09-01', recurringId: 'rent', amount: 1450, updatedAt: 5 });
+    const aug1 = exp({ id: occurrenceId('rent', '2026-08-01'), date: '2026-08-01', recurringId: 'rent' });
+    const ledger = [aug1, sep1];
+    const moved = { ...rent, startDate: '2026-01-15', generatedUntil: '2026-09-01' };
+
+    it('finds this month’s occurrence when the day moves later in the month', () => {
+      expect(scheduleClashes(moved, ledger, '2026-09-27')).toEqual([{ from: sep1, to: '2026-09-15' }]);
+      // still asks when the new day hasn't come yet this month
+      expect(scheduleClashes({ ...moved, startDate: '2026-01-30' }, ledger, '2026-09-27')).toEqual([{ from: sep1, to: '2026-09-30' }]);
+    });
+    it('no clash when the new date falls in a month without one', () => {
+      expect(scheduleClashes({ ...moved, startDate: '2026-10-15' }, ledger, '2026-09-27')).toEqual([]);
+      expect(scheduleClashes({ ...moved, frequency: 'dates', dates: ['2026-09-15'] }, ledger, '2026-09-27')).toEqual([]);
+    });
+    it('weekly: only a date within the same week clashes', () => {
+      const wk: Recurring = { ...r, id: 'w', frequency: 'weekly', startDate: '2026-09-01', generatedUntil: '2026-09-22' };
+      const tue = exp({ id: occurrenceId('w', '2026-09-22'), date: '2026-09-22', recurringId: 'w' });
+      expect(scheduleClashes({ ...wk, startDate: '2026-09-04' }, [tue], '2026-09-27')).toEqual([{ from: tue, to: '2026-09-25' }]);
+      expect(scheduleClashes(wk, [tue], '2026-09-27')).toEqual([]); // unchanged schedule: next is a week later
+    });
+    it('moving keeps the details, changes date and id, and deletes the original', () => {
+      const [to, from] = movedOccurrences([{ from: sep1, to: '2026-09-15' }]);
+      expect(to).toMatchObject({ id: 'rent__2026-09-15', date: '2026-09-15', amount: 1450 });
+      expect(to.deleted).toBeFalsy();
+      expect(from).toMatchObject({ id: 'rent__2026-09-01', deleted: true });
+      expect(balance([to, from], [])).toBe(725);
+    });
+    it('scheduleChanged ignores non-schedule edits', () => {
+      expect(scheduleChanged(rent, { ...rent, amount: 1600 })).toBe(false);
+      expect(scheduleChanged(rent, { ...rent, startDate: '2026-07-15' })).toBe(true);
+    });
+  });
+  it('addedUntil is the saved floor or the newest occurrence in the ledger, deleted ones included', () => {
+    const ledger = [
+      exp({ id: occurrenceId('r1', '2026-02-28'), date: '2026-02-28', recurringId: 'r1', deleted: true }),
+      exp({ id: occurrenceId('r1', '2026-01-31'), date: '2026-01-31', recurringId: 'r1' }),
+      exp({ id: 'other', date: '2026-09-01', recurringId: 'r2' }),
+    ];
+    expect(addedUntil(r, ledger)).toBe('2026-02-28');
+    expect(addedUntil({ ...r, generatedUntil: '2026-05-31' }, ledger)).toBe('2026-05-31');
+    expect(addedUntil(r, [])).toBeUndefined();
   });
 });
 
@@ -272,11 +330,14 @@ describe('splitwise import', () => {
 });
 
 describe('nextOccurrence', () => {
-  it('skips dates already generated', async () => {
-    const { nextOccurrence } = await import('./recurring');
-    const r = { id: 'x', kind: 'recurring', description: '', category: 'other', amount: 1, currency: 'GBP', paidBy: 'tom', split: 'equal', tomPct: 50,
-      frequency: 'monthly', startDate: '2026-09-27', generatedUntil: '2026-09-27', updatedAt: 1 } as const;
-    expect(nextOccurrence(r as never, '2026-09-27')).toBe('2026-10-27');
+  const r = { id: 'x', kind: 'recurring', description: '', category: 'other', amount: 1, currency: 'GBP', paidBy: 'tom', split: 'equal', tomPct: 50,
+    frequency: 'monthly', startDate: '2026-09-27', updatedAt: 1 } as const;
+  it('skips dates already generated', () => {
+    expect(nextOccurrence({ ...r, generatedUntil: '2026-09-27' } as never, '2026-09-27')).toBe('2026-10-27');
+  });
+  it('skips dates already in the ledger', () => {
+    expect(nextOccurrence(r as never, '2026-09-27')).toBe('2026-09-27');
+    expect(nextOccurrence(r as never, '2026-09-27', (id) => id === occurrenceId('x', '2026-09-27'))).toBe('2026-10-27');
   });
 });
 

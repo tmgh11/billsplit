@@ -6,7 +6,7 @@ A small, fast web app for Tom and Nuria to split shared costs. It replaces Split
 - **Quick splits.** 50/50, all Tom's, all Nuria's, or a custom %.
 - **Any currency.** Live rates come from [ExchangeRate-API](https://www.exchangerate-api.com), and each expense keeps the rate from the day it was added. You can also switch the whole ledger's currency.
 - **Settle up.** Record a full or partial transfer in either direction.
-- **Repeating expenses.** Weekly, every 2 weeks, monthly, yearly, or a list of set dates. They're added automatically, including any missed while nobody had the app open.
+- **Repeating expenses.** Weekly, every 2 weeks, monthly, yearly, or a list of set dates. They're added automatically when a phone syncs, including any missed while nobody had the app open. A phone that's offline waits until it's back online, so it never re-adds something the other phone has since edited, paused or deleted.
 - **Scan receipt.** Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared** on each item. The uneven totals go straight into the ledger.
 - **Spending.** Monthly totals, a 6-month chart and a category breakdown. You can view it for the household or for each person's share.
 - **Categories.** These are guessed from the description ("Tesco" → Groceries, "Council tax" → Bills). If you override a guess, the app learns it for next time.

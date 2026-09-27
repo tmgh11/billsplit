@@ -66,7 +66,10 @@ export interface Recurring extends Base {
   dates?: string[]; // for 'dates' frequency: explicit YYYY-MM-DD list
   endDate?: string;
   paused?: boolean;
-  /** last occurrence date already written to the ledger */
+  /**
+   * Occurrences on or before this date are never added. Only changed when a person saves, adds or
+   * resumes the template (never by automatic adding, so it can't overwrite the other phone's edits).
+   */
   generatedUntil?: string;
 }
 

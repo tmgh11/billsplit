@@ -4,7 +4,16 @@ import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categ
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import { fmt, parseMoney, pctForSplit, round2 } from '../lib/money';
 import { today } from '../lib/dates';
-import { describeFrequency, nextOccurrence, occurrenceId } from '../lib/recurring';
+import {
+  addedUntil,
+  describeFrequency,
+  movedOccurrences,
+  nextOccurrence,
+  occurrenceId,
+  scheduleChanged,
+  scheduleClashes,
+  type Clash,
+} from '../lib/recurring';
 import { newId, store, useStore } from '../lib/store';
 import type { Expense, Frequency, Person, Recurring, SplitMode } from '../lib/types';
 import { prettyDate } from '../lib/dates';
@@ -50,6 +59,9 @@ export function ExpenseForm(props: Props) {
   const [endDate, setEndDate] = useState(recInit?.endDate ?? '');
   const [dates, setDates] = useState<string[]>(recInit?.dates ?? []);
   const [newDate, setNewDate] = useState('');
+  /** set when saving a schedule change would add a second occurrence in a period; asks what to do */
+  const [clashes, setClashes] = useState<Clash[] | null>(null);
+  useEffect(() => setClashes(null), [frequency, startDate, dates]);
 
   const amount = parseMoney(amountText);
   const valid = Number.isFinite(amount) && amount > 0 && description.trim().length > 0 && (!repeat || frequency !== 'dates' || dates.length > 0);
@@ -109,17 +121,21 @@ export function ExpenseForm(props: Props) {
     [names],
   );
 
-  const onSave = () => {
+  // learn the category the user chose for this description
+  const learnCategory = () => {
+    const guessed = guessCategory(description);
+    if (catTouched && category !== guessed) {
+      store.updateSettings({ categoryRules: { ...settings.categoryRules, ...learnRule(description, category) } });
+    }
+  };
+
+  /** `clashAnswer`: what to do about occurrences a schedule change would double up (see below). */
+  const onSave = (clashAnswer?: 'move' | 'keep') => {
     if (!valid) return;
     const r = rate ?? parseMoney(rateText);
     if (!isRecurring && (!r || !Number.isFinite(r))) {
       toast('Enter an exchange rate first');
       return;
-    }
-    // learn the category the user chose for this description
-    const guessed = guessCategory(description);
-    if (catTouched && category !== guessed) {
-      store.updateSettings({ categoryRules: { ...settings.categoryRules, ...learnRule(description, category) } });
     }
     const common = {
       description: description.trim(),
@@ -142,8 +158,18 @@ export function ExpenseForm(props: Props) {
         startDate: frequency === 'dates' ? [...dates].sort()[0] ?? anchor : anchor,
         dates: frequency === 'dates' ? [...dates].sort() : undefined,
         endDate: endDate || undefined,
+        // editing: don't back-fill anything before what's already in the ledger
+        generatedUntil: recInit ? addedUntil(recInit, store.all()) : undefined,
         updatedAt: 0,
       };
+      // Schedule moved (e.g. 1st → 15th) after this period's was already added: ask first.
+      let moves: Clash[] = [];
+      if (recInit && scheduleChanged(recInit, rec)) {
+        moves = scheduleClashes(rec, store.all());
+        if (moves.length && !clashAnswer) return setClashes(moves);
+        if (clashAnswer === 'keep') moves = [];
+      }
+      learnCategory();
       if (!isRecurring) {
         // Adding a new expense that also repeats: log today's one now, schedule the rest.
         rec.generatedUntil = date;
@@ -153,12 +179,15 @@ export function ExpenseForm(props: Props) {
         });
         toast('Added, and set to repeat');
       } else {
-        store.put(rec);
+        store.put(rec, ...movedOccurrences(moves));
         void store.generateRecurring();
-        const next = nextOccurrence(rec, today());
-        toast(next ? `Saved · next on ${prettyDate(next)}` : 'Saved');
+        const next = nextOccurrence(rec, today(), (id) => store.has(id));
+        toast(
+          moves.length === 1 ? `Saved · moved to ${prettyDate(moves[0].to)}` : next ? `Saved · next on ${prettyDate(next)}` : 'Saved',
+        );
       }
     } else {
+      learnCategory();
       const e: Expense = {
         ...(init as Expense | undefined),
         ...common,
@@ -197,16 +226,51 @@ export function ExpenseForm(props: Props) {
       onClose={props.onClose}
       full
       footer={
-        <div className="btn-row">
-          {isEdit && (
-            <button className="btn danger" style={{ width: 'auto' }} onClick={onDelete} aria-label="Delete">
-              <Icon name="trash" size={20} />
+        clashes ? (
+          <div role="alertdialog" aria-labelledby="clash-q">
+            <p id="clash-q" style={{ margin: '0 0 12px', fontSize: 15 }}>
+              {clashes.length === 1 ? (
+                <>
+                  <strong>{description.trim()}</strong> was already {clashes[0].from.deleted ? 'added and deleted' : 'added'} on{' '}
+                  <strong>{prettyDate(clashes[0].from.date)}</strong>. Move it to <strong>{prettyDate(clashes[0].to)}</strong>, or keep
+                  both?
+                </>
+              ) : (
+                <>
+                  The new schedule adds dates in periods that already have one. Move these, or keep both?
+                  {clashes.map((c) => (
+                    <span key={c.from.id} style={{ display: 'block', marginTop: 4 }}>
+                      {prettyDate(c.from.date)}
+                      {c.from.deleted ? ' (deleted)' : ''} → {prettyDate(c.to)}
+                    </span>
+                  ))}
+                </>
+              )}
+            </p>
+            <div className="btn-row">
+              <button className="btn" style={{ width: 'auto' }} onClick={() => setClashes(null)}>
+                Back
+              </button>
+              <button className="btn" onClick={() => onSave('keep')}>
+                Keep both
+              </button>
+              <button className="btn primary" onClick={() => onSave('move')}>
+                {clashes.length === 1 ? 'Move it' : 'Move them'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="btn-row">
+            {isEdit && (
+              <button className="btn danger" style={{ width: 'auto' }} onClick={onDelete} aria-label="Delete">
+                <Icon name="trash" size={20} />
+              </button>
+            )}
+            <button className="btn primary" disabled={!valid} onClick={() => onSave()}>
+              {isEdit ? 'Save changes' : isRecurring || repeat ? 'Save & schedule' : 'Add expense'}
             </button>
-          )}
-          <button className="btn primary" disabled={!valid} onClick={onSave}>
-            {isEdit ? 'Save changes' : isRecurring || repeat ? 'Save & schedule' : 'Add expense'}
-          </button>
-        </div>
+          </div>
+        )
       }
     >
       <div className="amount-entry">
