@@ -3,9 +3,10 @@ import { Icon, Seg, toast } from './ui';
 import { store, useStore } from '../lib/store';
 import { configBakedIn, resetClient, signIn, signOut, supabaseConfig, syncNow } from '../lib/sync';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
-import { parseSplitwise, type SplitwiseImport } from '../lib/splitwise';
+import { parseSplitwise, planSplitwiseImport, type SplitwiseImport } from '../lib/splitwise';
 import { categoryById } from '../lib/categories';
-import { baseAmount, shares } from '../lib/money';
+import { baseAmount, fmt, shares } from '../lib/money';
+import { prettyDate } from '../lib/dates';
 import type { Entry, Person } from '../lib/types';
 
 function download(name: string, text: string, type: string) {
@@ -40,12 +41,9 @@ export function SettingsView() {
     }
   };
 
-  const changeCurrency = async (c: string) => {
-    setBusy(true);
-    const ok = await store.changeBaseCurrency(c);
-    setBusy(false);
-    toast(ok ? `Ledger now in ${c}` : 'Couldn’t fetch exchange rates — try again online');
-  };
+  // The ledger currency can only be picked while the ledger is empty (deleted entries count, since
+  // Undo can bring them back). Changing it later would mean re-rating every entry on both phones.
+  const ledgerStarted = store.all().some((e) => e.kind === 'expense' || e.kind === 'settlement');
 
   const doSignIn = async () => {
     setBusy(true);
@@ -100,12 +98,15 @@ export function SettingsView() {
     }
   };
 
+  // What importing would do: only rows not already in the ledger are added
+  const plan = sw ? planSplitwiseImport(sw.parsed, store.all()) : null;
+
   const runSplitwiseImport = async () => {
-    if (!sw) return;
+    if (!plan?.add.length) return;
     setBusy(true);
     const base = settings.baseCurrency;
     const rates = new Map<string, number>();
-    for (const c of new Set([...sw.parsed.expenses, ...sw.parsed.settlements].map((x) => x.currency))) {
+    for (const c of new Set(plan.add.map((x) => x.currency))) {
       const r = await rateToBase(c, base);
       if (r == null) {
         setBusy(false);
@@ -113,10 +114,7 @@ export function SettingsView() {
       }
       rates.set(c, r);
     }
-    const entries: Entry[] = [
-      ...sw.parsed.expenses.map((e) => ({ ...e, rate: rates.get(e.currency)!, updatedAt: 0 })),
-      ...sw.parsed.settlements.map((s) => ({ ...s, rate: rates.get(s.currency)!, updatedAt: 0 })),
-    ];
+    const entries = plan.add.map((x) => ({ ...x, rate: rates.get(x.currency)!, updatedAt: 0 }) as Entry);
     store.put(...entries);
     setBusy(false);
     setSw(null);
@@ -158,13 +156,23 @@ export function SettingsView() {
         <div className="set-row">
           <div className="grow">
             <div style={{ fontWeight: 600 }}>Ledger currency</div>
-            <div className="hint">Balances and charts are shown in this</div>
+            <div className="hint">
+              {ledgerStarted
+                ? 'Balances and charts are in this. Add expenses in any currency; they’re converted when added.'
+                : 'Balances and charts are shown in this. Pick it before adding anything; it’s fixed after that.'}
+            </div>
           </div>
-          <select className="cur-select" value={settings.baseCurrency} disabled={busy} onChange={(e) => void changeCurrency(e.target.value)} aria-label="Ledger currency">
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>{CURRENCY_FLAGS[c] ?? ''} {c}</option>
-            ))}
-          </select>
+          {ledgerStarted ? (
+            <strong style={{ whiteSpace: 'nowrap' }}>
+              {CURRENCY_FLAGS[settings.baseCurrency] ?? ''} {settings.baseCurrency}
+            </strong>
+          ) : (
+            <select className="cur-select" value={settings.baseCurrency} onChange={(e) => store.updateSettings({ baseCurrency: e.target.value })} aria-label="Ledger currency">
+              {CURRENCIES.map((c) => (
+                <option key={c} value={c}>{CURRENCY_FLAGS[c] ?? ''} {c}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
 
@@ -257,9 +265,33 @@ export function SettingsView() {
             onChange={(v) => setSw({ ...sw, tomCol: Number(v) as 0 | 1, parsed: parseSplitwise(sw.text, Number(v) as 0 | 1) })}
             options={sw.parsed.people.map((p, i) => ({ value: String(i) as '0' | '1', label: p }))}
           />
+          {plan && (
+            <>
+              <p className="text-2" style={{ fontSize: 14, marginBottom: 0 }}>
+                {plan.add.length ? <strong>{plan.add.length} new</strong> : 'Nothing new'}
+                {plan.already ? ` · ${plan.already} already imported (left as they are here, including edits and deletions)` : ''}
+              </p>
+              {plan.notInFile.length > 0 && (
+                <details style={{ fontSize: 14, marginTop: 8 }}>
+                  <summary>
+                    {plan.notInFile.length} imported earlier but not in this file — probably edited or deleted in Splitwise. Check
+                    and delete any you don’t want.
+                  </summary>
+                  {plan.notInFile.map((e) => (
+                    <div key={e.id} className="text-2" style={{ padding: '3px 0' }}>
+                      {prettyDate(e.date)} · {e.kind === 'expense' ? e.description : `${settings.names[e.from]} paid ${settings.names[e.to]}`} ·{' '}
+                      {fmt(e.amount, e.currency)}
+                    </div>
+                  ))}
+                </details>
+              )}
+            </>
+          )}
           <div className="btn-row" style={{ marginTop: 12 }}>
             <button className="btn" onClick={() => setSw(null)}>Cancel</button>
-            <button className="btn primary" disabled={busy} onClick={() => void runSplitwiseImport()}>Import</button>
+            <button className="btn primary" disabled={busy || !plan?.add.length} onClick={() => void runSplitwiseImport()}>
+              {plan?.add.length ? `Add ${plan.add.length}` : 'Import'}
+            </button>
           </div>
         </div>
       )}

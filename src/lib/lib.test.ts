@@ -26,7 +26,7 @@ import {
 } from './recurring';
 import { guessCategory, learnRule } from './categories';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
-import { parseSplitwise } from './splitwise';
+import { parseSplitwise, planSplitwiseImport } from './splitwise';
 import { isISODate, rewindTimestamp } from './dates';
 import { mergeLegacy } from './persist';
 import type { Expense, Recurring, Settlement } from './types';
@@ -480,6 +480,61 @@ describe('splitwise import – real-world file quirks', () => {
   });
   it('explains what it found when the columns are wrong', () => {
     expect(() => parseSplitwise('Name,Email\nx,y')).toThrow(/found: Name, Email/);
+  });
+});
+
+describe('splitwise re-import', () => {
+  const head = 'Date,Description,Category,Cost,Currency,Tom,Nuria\n';
+  const tesco = '2026-01-02,Tesco,Groceries,40.00,GBP,20.00,-20.00\n';
+  const coffee = '2026-01-03,Coffee,Dining out,3.00,GBP,1.50,-1.50\n';
+  const rent = '2026-01-05,Rent,Rent,1500.00,GBP,-750.00,750.00\n';
+  const paid = '2026-01-06,Settle,Payment,20.00,GBP,20.00,-20.00\n';
+  const asLedger = (list: { expenses: object[]; settlements: object[] }) =>
+    [...list.expenses, ...list.settlements].map((x) => ({ ...x, rate: 1, updatedAt: 1 }) as Expense | Settlement);
+
+  it('a row keeps its id when later exports add rows before it', () => {
+    const first = parseSplitwise(head + tesco + rent);
+    const later = parseSplitwise(head + tesco + coffee + rent);
+    const idOf = (r: typeof first, d: string) => r.expenses.find((e) => e.description === d)!.id;
+    expect(idOf(later, 'Rent')).toBe(idOf(first, 'Rent'));
+    expect(idOf(later, 'Tesco')).toBe(idOf(first, 'Tesco'));
+  });
+  it('identical rows get distinct ids, and choosing the other column for Tom doesn’t change ids', () => {
+    const twice = parseSplitwise(head + coffee + coffee);
+    expect(new Set(twice.expenses.map((e) => e.id)).size).toBe(2);
+    const a = parseSplitwise(head + tesco + paid, 0);
+    const b = parseSplitwise(head + tesco + paid, 1);
+    expect([...b.expenses, ...b.settlements].map((e) => e.id)).toEqual([...a.expenses, ...a.settlements].map((e) => e.id));
+  });
+  it('re-importing adds only new rows', () => {
+    const ledger = asLedger(parseSplitwise(head + tesco + rent + paid));
+    const same = planSplitwiseImport(parseSplitwise(head + tesco + rent + paid), ledger);
+    expect(same).toMatchObject({ add: [], already: 3, notInFile: [] });
+    const newer = planSplitwiseImport(parseSplitwise(head + tesco + coffee + rent + paid), ledger);
+    expect(newer.add.map((e) => e.date)).toEqual(['2026-01-03']);
+    expect(newer.already).toBe(3);
+  });
+  it('keeps deletions and edits made in Billsplit', () => {
+    const [t, r] = asLedger(parseSplitwise(head + tesco + rent));
+    const ledger = [{ ...t, deleted: true }, { ...r, amount: 1450 }];
+    const plan = planSplitwiseImport(parseSplitwise(head + tesco + rent), ledger);
+    expect(plan.add).toEqual([]);
+    expect(plan.notInFile).toEqual([]);
+  });
+  it('flags rows that changed in Splitwise instead of guessing', () => {
+    const ledger = asLedger(parseSplitwise(head + tesco + rent));
+    const plan = planSplitwiseImport(parseSplitwise(head + tesco + rent.replace('1500.00', '1550.00').replace('750.00', '775.00')), ledger);
+    expect(plan.add.map((e) => e.amount)).toEqual([1550]);
+    expect(plan.notInFile.map((e) => e.amount)).toEqual([1500]);
+  });
+  it('recognises entries imported with the old row-number ids', () => {
+    const old = asLedger(parseSplitwise(head + tesco + rent + paid)).map((e, i) => ({
+      ...e, id: `sw${String(i + 1).padStart(5, '0')}${e.date.replace(/-/g, '')}`, deleted: i === 1,
+    }));
+    const plan = planSplitwiseImport(parseSplitwise(head + tesco + coffee + rent + paid), old);
+    expect(plan.add.map((e) => e.date)).toEqual(['2026-01-03']); // deleted rent not re-added either
+    expect(plan.already).toBe(3);
+    expect(plan.notInFile).toEqual([]);
   });
 });
 

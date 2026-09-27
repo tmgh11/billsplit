@@ -34,13 +34,17 @@ export const baseAmount = (e: { amount: number; rate: number }) => basePence(e) 
  * both phones, and close to 50/50 between the two of you over many expenses.
  */
 export function oddPennyTo(id: string): Person {
-  // FNV-1a hash; the top bit is the best mixed
+  return fnv1a(id) >>> 31 ? 'nuria' : 'tom'; // the top bit is the best mixed
+}
+
+/** FNV-1a: a small, fast string hash (unsigned 32-bit). Not for anything secret. */
+export function fnv1a(s: string): number {
   let h = 0x811c9dc5;
-  for (let i = 0; i < id.length; i++) {
-    h ^= id.charCodeAt(i);
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return h >>> 31 ? 'nuria' : 'tom';
+  return h >>> 0;
 }
 
 type Splittable = Pick<Expense, 'id' | 'amount' | 'rate' | 'split' | 'tomPct'>;

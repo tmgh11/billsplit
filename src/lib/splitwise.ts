@@ -3,9 +3,9 @@
  * Columns: Date, Description, Category, Cost, Currency, <Person A>, <Person B>
  * The person columns are each row's net effect: positive = that person is owed.
  */
-import type { Expense, Person, Settlement } from './types';
+import type { Entry, Expense, Person, Settlement } from './types';
 import { guessCategory } from './categories';
-import { round2 } from './money';
+import { fnv1a, round2, toPence } from './money';
 
 export function parseCSV(text: string, delimiter = ','): string[][] {
   const rows: string[][] = [];
@@ -108,7 +108,14 @@ export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImp
 
   const expenses: SplitwiseImport['expenses'] = [];
   const settlements: SplitwiseImport['settlements'] = [];
-  let n = 0;
+  const seen = new Map<string, number>();
+  /** Id from the row's content, so the same row gets the same id in any later export. */
+  const idFor = (row: KeyFields) => {
+    const key = importKey(row);
+    const n = (seen.get(key) ?? 0) + 1; // identical rows (two £3 coffees on one day) are #1, #2…
+    seen.set(key, n);
+    return `sw_${fnv1a(key).toString(36)}${fnv1a(`#${key}`).toString(36)}_${n}`;
+  };
 
   for (const r of rows.slice(headerRow + 1)) {
     const date = toISODate(r[iDate] ?? '');
@@ -119,15 +126,15 @@ export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImp
     const currency = ((iCur >= 0 ? r[iCur] : '') || 'GBP').trim().toUpperCase();
     const description = (r[iDesc] ?? '').trim();
     const swCat = iCat >= 0 ? (r[iCat] ?? '').trim() : '';
-    const id = `sw${String(++n).padStart(5, '0')}${date.replace(/-/g, '')}`;
 
     if (/^payment$/i.test(swCat)) {
       // The payer is shown as owed (+) because paying reduces what they owe.
       const from: Person = tom > 0 ? 'tom' : 'nuria';
-      settlements.push({
-        id, kind: 'settlement', date, from, to: from === 'tom' ? 'nuria' : 'tom',
+      const s: Omit<Settlement, 'id' | 'rate' | 'updatedAt'> = {
+        kind: 'settlement', date, from, to: from === 'tom' ? 'nuria' : 'tom',
         amount: round2(Math.abs(tom || cost)), currency, note: description || 'Imported from Splitwise',
-      });
+      };
+      settlements.push({ ...s, id: idFor(s) });
       continue;
     }
 
@@ -136,10 +143,74 @@ export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImp
     const tomPct = cost ? Math.min(100, Math.max(0, (tomShare / cost) * 100)) : 50;
     const split = Math.abs(tomPct - 50) < 0.01 ? 'equal' : tomPct >= 99.99 ? 'tom' : tomPct <= 0.01 ? 'nuria' : 'custom';
     const category = SW_CATEGORIES.find(([re]) => re.test(swCat))?.[1] ?? guessCategory(description) ?? 'other';
-    expenses.push({
-      id, kind: 'expense', date, description: description || swCat || 'Expense', category,
+    const e: Omit<Expense, 'id' | 'rate' | 'updatedAt'> = {
+      kind: 'expense', date, description: description || swCat || 'Expense', category,
       amount: round2(cost), currency, paidBy, split, tomPct,
-    });
+    };
+    expenses.push({ ...e, id: idFor(e) });
   }
   return { people, expenses, settlements };
+}
+
+type ImportedRow = SplitwiseImport['expenses'][number] | SplitwiseImport['settlements'][number];
+
+type KeyFields = Pick<Expense, 'date' | 'amount' | 'currency'> &
+  ({ kind: 'expense'; description: string } | { kind: 'settlement'; note?: string });
+
+/**
+ * What identifies a Splitwise row from one export to the next. Splitwise's CSV has no row ids,
+ * so this is the row's content: kind, date, description, amount and currency. Who paid isn't
+ * included, so choosing a different column for Tom doesn't change it.
+ */
+export function importKey(e: KeyFields): string {
+  const text = e.kind === 'expense' ? e.description : e.note ?? '';
+  return [e.kind, e.date, text.trim().toLowerCase(), toPence(e.amount), e.currency].join('|');
+}
+
+/** Ids from before ids were content-based (row number + date); matched by content instead. */
+const LEGACY_ID = /^sw\d{13}$/;
+
+export interface ImportPlan {
+  /** rows not yet in Billsplit */
+  add: ImportedRow[];
+  /** rows already imported (whether since edited or deleted in Billsplit, which is kept) */
+  already: number;
+  /** earlier-imported entries, still in the ledger, that this file doesn't have — probably edited or deleted in Splitwise */
+  notInFile: (Expense | Settlement)[];
+}
+
+/**
+ * Work out what importing an export would do, given everything in the ledger (including deleted
+ * entries). Only new rows are added: anything imported before is left as it is in Billsplit.
+ */
+export function planSplitwiseImport(parsed: SplitwiseImport, ledger: Iterable<Entry>): ImportPlan {
+  const ids = new Set<string>();
+  const imported: (Expense | Settlement)[] = [];
+  const legacy = new Map<string, (Expense | Settlement)[]>();
+  for (const e of ledger) {
+    ids.add(e.id);
+    if ((e.kind !== 'expense' && e.kind !== 'settlement') || !e.id.startsWith('sw')) continue;
+    imported.push(e);
+    if (LEGACY_ID.test(e.id)) {
+      const k = importKey(e);
+      legacy.set(k, [...(legacy.get(k) ?? []), e]);
+    }
+  }
+
+  const matched = new Set<string>();
+  const add: ImportedRow[] = [];
+  for (const row of [...parsed.expenses, ...parsed.settlements]) {
+    if (ids.has(row.id)) {
+      matched.add(row.id);
+      continue;
+    }
+    const old = legacy.get(importKey(row))?.shift();
+    if (old) matched.add(old.id);
+    else add.push(row);
+  }
+  return {
+    add,
+    already: matched.size,
+    notInFile: imported.filter((e) => !e.deleted && !matched.has(e.id)),
+  };
 }

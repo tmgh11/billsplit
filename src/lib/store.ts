@@ -305,24 +305,6 @@ class Store {
     this.changed(ids);
     this.onDirty?.();
   }
-
-  /** Change the ledger currency, converting every stored rate so balances stay correct. */
-  async changeBaseCurrency(next: string) {
-    const settings = this.settings();
-    const prev = settings.baseCurrency;
-    if (prev === next) return true;
-    const factor = await rateToBase(prev, next); // next-units per 1 prev-unit
-    if (factor == null) return false;
-    const updated: Entry[] = [];
-    for (const e of this.entries.values()) {
-      if ((e.kind === 'expense' || e.kind === 'settlement') && !e.deleted) {
-        const rate = e.currency === next ? 1 : e.rate * factor;
-        updated.push({ ...e, rate });
-      }
-    }
-    this.put(...updated, { ...settings, baseCurrency: next });
-    return true;
-  }
 }
 
 export const store = new Store();
