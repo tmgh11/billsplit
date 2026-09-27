@@ -7,7 +7,7 @@ import type { Expense, Person, Settlement } from './types';
 import { guessCategory } from './categories';
 import { round2 } from './money';
 
-export function parseCSV(text: string): string[][] {
+export function parseCSV(text: string, delimiter = ','): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cell = '';
@@ -21,7 +21,7 @@ export function parseCSV(text: string): string[][] {
       } else if (c === '"') q = false;
       else cell += c;
     } else if (c === '"') q = true;
-    else if (c === ',') {
+    else if (c === delimiter) {
       row.push(cell);
       cell = '';
     } else if (c === '\n' || c === '\r') {
@@ -59,17 +59,50 @@ export interface SplitwiseImport {
   settlements: Omit<Settlement, 'rate' | 'updatedAt'>[];
 }
 
+/** Accepts Splitwise's YYYY-MM-DD, or DD/MM/YYYY if the file was re-saved from Excel/Sheets. */
+function toISODate(raw: string): string | null {
+  const s = raw.trim();
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/);
+  if (m) {
+    const y = m[3].length === 2 ? `20${m[3]}` : m[3];
+    return `${y}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  }
+  return null;
+}
+
+function toNum(raw: string | undefined): number {
+  if (raw == null) return NaN;
+  let s = raw.trim().replace(/[£€$\s]/g, '');
+  if (/,\d{1,2}$/.test(s) && !s.includes('.')) s = s.replace(',', '.'); // "12,50"
+  return parseFloat(s.replace(/,/g, ''));
+}
+
 export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImport {
-  const rows = parseCSV(text);
-  const header = rows[0]?.map((h) => h.trim()) ?? [];
-  const iDate = header.findIndex((h) => /^date$/i.test(h));
-  const iDesc = header.findIndex((h) => /^description$/i.test(h));
-  const iCat = header.findIndex((h) => /^category$/i.test(h));
-  const iCost = header.findIndex((h) => /^cost$/i.test(h));
-  const iCur = header.findIndex((h) => /^currency$/i.test(h));
-  if ([iDate, iDesc, iCost, iCur].some((i) => i < 0)) throw new Error('This does not look like a Splitwise CSV export');
-  const personCols = header.map((_, i) => i).filter((i) => i > iCur && header[i]);
-  if (personCols.length !== 2) throw new Error(`Expected 2 people in the export, found ${personCols.length}`);
+  // Splitwise starts its CSV with an invisible byte-order mark; files re-saved elsewhere may use ; or tabs
+  const clean = text.replace(/^﻿/, '');
+  const firstLine = clean.slice(0, clean.search(/\r?\n/) >>> 0 || 500);
+  const delimiter = [',', ';', '\t'].sort((a, b) => firstLine.split(b).length - firstLine.split(a).length)[0];
+  const rows = parseCSV(clean, delimiter);
+  const norm = (h: string) => h.replace(/﻿/g, '').trim().toLowerCase();
+  const headerRow = rows.slice(0, 10).findIndex((r) => r.some((c) => norm(c) === 'date') && r.some((c) => /^(cost|amount)$/.test(norm(c))));
+  const header = (rows[headerRow] ?? rows[0] ?? []).map((h) => h.replace(/﻿/g, '').trim());
+  const find = (re: RegExp) => header.findIndex((h) => re.test(norm(h)));
+  const iDate = find(/^date$/);
+  const iDesc = find(/^description$/);
+  const iCat = find(/^category$/);
+  const iCost = find(/^(cost|amount)$/);
+  const iCur = find(/^currency$/);
+  if (headerRow < 0 || [iDate, iDesc, iCost].some((i) => i < 0)) {
+    const seen = header.filter(Boolean).slice(0, 7).join(', ') || 'nothing readable';
+    throw new Error(`This doesn’t look like a Splitwise export – expected Date, Description, Cost… columns but found: ${seen}`);
+  }
+  const lastFixed = Math.max(iDate, iDesc, iCat, iCost, iCur);
+  const personCols = header.map((_, i) => i).filter((i) => i > lastFixed && header[i]);
+  if (personCols.length !== 2) {
+    throw new Error(`Expected 2 people in the export, found ${personCols.length}: ${personCols.map((i) => header[i]).join(', ')}`);
+  }
   const people = personCols.map((i) => header[i]);
   const tomIdx = personCols[tomColumn];
 
@@ -77,13 +110,13 @@ export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImp
   const settlements: SplitwiseImport['settlements'] = [];
   let n = 0;
 
-  for (const r of rows.slice(1)) {
-    const date = (r[iDate] ?? '').trim();
-    if (!/^\d{4}-\d{2}-\d{2}/.test(date)) continue; // skips "Total balance" etc.
-    const cost = parseFloat(r[iCost]);
-    const tom = parseFloat(r[tomIdx]);
+  for (const r of rows.slice(headerRow + 1)) {
+    const date = toISODate(r[iDate] ?? '');
+    if (!date || /total balance/i.test(r[iDesc] ?? '')) continue; // skips the summary row
+    const cost = toNum(r[iCost]);
+    const tom = toNum(r[tomIdx]);
     if (!Number.isFinite(cost) || !Number.isFinite(tom)) continue;
-    const currency = (r[iCur] || 'GBP').trim().toUpperCase();
+    const currency = ((iCur >= 0 ? r[iCur] : '') || 'GBP').trim().toUpperCase();
     const description = (r[iDesc] ?? '').trim();
     const swCat = iCat >= 0 ? (r[iCat] ?? '').trim() : '';
     const id = `sw${String(++n).padStart(5, '0')}${date.replace(/-/g, '')}`;
@@ -92,7 +125,7 @@ export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImp
       // The payer is shown as owed (+) because paying reduces what they owe.
       const from: Person = tom > 0 ? 'tom' : 'nuria';
       settlements.push({
-        id, kind: 'settlement', date: date.slice(0, 10), from, to: from === 'tom' ? 'nuria' : 'tom',
+        id, kind: 'settlement', date, from, to: from === 'tom' ? 'nuria' : 'tom',
         amount: round2(Math.abs(tom || cost)), currency, note: description || 'Imported from Splitwise',
       });
       continue;
@@ -104,7 +137,7 @@ export function parseSplitwise(text: string, tomColumn: 0 | 1 = 0): SplitwiseImp
     const split = Math.abs(tomPct - 50) < 0.01 ? 'equal' : tomPct >= 99.99 ? 'tom' : tomPct <= 0.01 ? 'nuria' : 'custom';
     const category = SW_CATEGORIES.find(([re]) => re.test(swCat))?.[1] ?? guessCategory(description) ?? 'other';
     expenses.push({
-      id, kind: 'expense', date: date.slice(0, 10), description: description || swCat || 'Expense', category,
+      id, kind: 'expense', date, description: description || swCat || 'Expense', category,
       amount: round2(cost), currency, paidBy, split, tomPct,
     });
   }

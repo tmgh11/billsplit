@@ -96,7 +96,7 @@ export function SettingsView() {
       const guessTom: 0 | 1 = /tom/i.test(parsed.people[1]) && !/tom/i.test(parsed.people[0]) ? 1 : 0;
       setSw({ text, parsed: guessTom ? parseSplitwise(text, 1) : parsed, tomCol: guessTom });
     } catch (e) {
-      toast(e instanceof Error ? e.message : 'Couldn’t read that file');
+      toast(e instanceof Error ? e.message : 'Couldn’t read that file', undefined, 9000);
     }
   };
 

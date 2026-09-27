@@ -294,3 +294,28 @@ describe('total cross-checks', () => {
     expect(r.printedTotal).toBe(null);
   });
 });
+
+describe('splitwise import – real-world file quirks', () => {
+  const csv = `Date,Description,Category,Cost,Currency,Tom Marriott,Nuria Garcia
+2026-01-02,Tesco,Groceries,40.00,GBP,20.00,-20.00
+2026-01-05,Total balance, , ,GBP,20.00,-20.00`;
+  it('handles the byte-order mark Splitwise puts at the start', () => {
+    const r = parseSplitwise('﻿' + csv);
+    expect(r.expenses).toHaveLength(1);
+    expect(r.people).toEqual(['Tom Marriott', 'Nuria Garcia']);
+  });
+  it('handles a file re-saved with semicolons and UK dates', () => {
+    const semi = `Date;Description;Category;Cost;Currency;Tom;Nuria\r\n02/01/2026;Tesco;Groceries;40,00;GBP;20,00;-20,00\r\n`;
+    const r = parseSplitwise(semi);
+    expect(r.expenses[0]).toMatchObject({ date: '2026-01-02', amount: 40, paidBy: 'tom', split: 'equal' });
+  });
+  it('explains what it found when the columns are wrong', () => {
+    expect(() => parseSplitwise('Name,Email\nx,y')).toThrow(/found: Name, Email/);
+  });
+});
+
+describe('splitwise placeholder file', () => {
+  it('recognises the "we will email you" placeholder', () => {
+    expect(() => parseSplitwise("We'll send you an email with your expense spreadsheet as soon as it's ready.")).toThrow(/email/);
+  });
+});
