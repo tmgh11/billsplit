@@ -91,6 +91,7 @@ async function pull(sb: SupabaseClient) {
 }
 
 async function runSync() {
+  await store.ready;
   const sb = getClient();
   if (!sb) {
     store.setSync({ state: 'local', email: undefined });

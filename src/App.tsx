@@ -22,7 +22,7 @@ type Tab = 'ledger' | 'stats' | 'repeat' | 'settings';
 const TITLES: Record<Tab, string> = { ledger: 'Billsplit', stats: 'Spending', repeat: 'Repeating', settings: 'Settings' };
 
 export default function App() {
-  const { sync, device, settings } = useStore();
+  const { sync, device, settings, loaded } = useStore();
   const [tab, setTab] = useState<Tab>('ledger');
   const [sheet, setSheet] = useState<SheetState>(null);
   const close = useCallback(() => setSheet(null), []);
@@ -34,6 +34,14 @@ export default function App() {
 
   const dot = sync.state === 'synced' ? 'ok' : sync.state === 'syncing' ? 'busy' : sync.state === 'error' ? 'bad' : sync.state === 'offline' ? 'warn' : '';
   const pill = { local: 'On this phone', 'signed-out': 'Signed out', syncing: 'Syncing', synced: 'Synced', offline: 'Offline', error: 'Sync error' }[sync.state];
+
+  if (!loaded) {
+    return (
+      <div className="app" style={{ display: 'grid', placeItems: 'center', minHeight: '80dvh' }}>
+        <img src="icons/icon-192.png" alt="" style={{ width: 64, height: 64, borderRadius: 18, opacity: 0.9 }} />
+      </div>
+    );
+  }
 
   if (!device.onboarded) {
     return (

@@ -1,7 +1,7 @@
 /**
- * Local-first store. Everything lives in localStorage on the phone so the app opens instantly
- * and works offline; changes are queued ("dirty") and pushed to Supabase when possible.
- * Conflicts resolve last-write-wins on each entry's `updatedAt`.
+ * Local-first store. The whole ledger is kept in memory and on the phone (IndexedDB) so the
+ * app opens instantly and works offline; changes are queued ("dirty") and pushed to Supabase
+ * when possible. Conflicts resolve last-write-wins on each entry's `updatedAt`.
  */
 import { useSyncExternalStore } from 'react';
 import type { Entry, Expense, Person, Recurring, Settings, Settlement } from './types';
@@ -9,10 +9,9 @@ import { SETTINGS_ID, defaultSettings } from './types';
 import { today } from './dates';
 import { dueExpenses } from './recurring';
 import { rateToBase } from './fx';
+import { openPersistence, type Persistence } from './persist';
 
 const K = {
-  entries: 'billsplit.entries',
-  dirty: 'billsplit.dirty',
   device: 'billsplit.device',
 };
 
@@ -26,6 +25,8 @@ export interface DeviceSettings {
 }
 
 export interface Snapshot {
+  /** false until the ledger has been read from the phone's storage */
+  loaded: boolean;
   expenses: Expense[];
   settlements: Settlement[];
   recurring: Recurring[];
@@ -56,8 +57,15 @@ export const newId = () =>
 type Listener = () => void;
 
 class Store {
-  private entries = new Map<string, Entry>(Object.entries(load<Record<string, Entry>>(K.entries, {})));
-  private dirty = new Set<string>(load<string[]>(K.dirty, []));
+  private entries = new Map<string, Entry>();
+  private dirty = new Set<string>();
+  private loaded = false;
+  private persistence: Persistence | null = null;
+  /** ids changed in memory but not yet written to the phone's storage */
+  private unsaved = new Set<string>();
+  private writing: Promise<void> = Promise.resolve();
+  /** resolves once the ledger has been loaded from storage */
+  readonly ready: Promise<void>;
   private device: DeviceSettings = load<DeviceSettings>(K.device, { me: 'tom' });
   private syncInfo: Snapshot['sync'] = { state: 'local' };
   private listeners = new Set<Listener>();
@@ -65,6 +73,28 @@ class Store {
   private persistTimer: number | undefined;
   /** set by the sync module */
   onDirty: (() => void) | null = null;
+
+  constructor() {
+    this.ready = this.init();
+  }
+
+  private async init() {
+    try {
+      this.persistence = await openPersistence();
+      const { entries, dirty } = await this.persistence.loadAll();
+      // anything created before loading finished (unlikely) wins over what was stored
+      for (const e of entries) if (!this.entries.has(e.id)) this.entries.set(e.id, e);
+      for (const id of dirty) this.dirty.add(id);
+    } catch (e) {
+      console.error('Could not load saved data', e);
+    }
+    this.loaded = true;
+    this.changed([]);
+  }
+
+  storageKind() {
+    return this.persistence?.kind ?? 'loading';
+  }
 
   subscribe = (l: Listener) => {
     this.listeners.add(l);
@@ -89,26 +119,37 @@ class Store {
     expenses.sort(byDate);
     settlements.sort(byDate);
     recurring.sort((a, b) => a.description.localeCompare(b.description));
-    this.snap = { expenses, settlements, recurring, settings, device: this.device, sync: this.syncInfo };
+    this.snap = { loaded: this.loaded, expenses, settlements, recurring, settings, device: this.device, sync: this.syncInfo };
     return this.snap;
   };
 
-  private changed(persist = true) {
+  /** Notify the UI; `ids` (if given) are entries to write to the phone's storage. */
+  private changed(ids: Iterable<string> | null = null) {
     this.snap = null;
-    if (persist) {
+    if (ids) {
+      for (const id of ids) this.unsaved.add(id);
       clearTimeout(this.persistTimer);
-      this.persistTimer = window.setTimeout(() => {
-        save(K.entries, Object.fromEntries(this.entries));
-        save(K.dirty, [...this.dirty]);
-      }, 50);
+      this.persistTimer = window.setTimeout(() => void this.flush(), 30);
     }
     this.listeners.forEach((l) => l());
   }
 
-  flush() {
+  /** Write pending changes to the phone's storage (serialised so writes never overlap). */
+  flush(): Promise<void> {
     clearTimeout(this.persistTimer);
-    save(K.entries, Object.fromEntries(this.entries));
-    save(K.dirty, [...this.dirty]);
+    if (!this.persistence || !this.loaded) return this.writing;
+    const ids = [...this.unsaved];
+    this.unsaved.clear();
+    const changed = ids.map((id) => this.entries.get(id)).filter(Boolean) as Entry[];
+    const dirty = [...this.dirty];
+    const p = this.persistence;
+    this.writing = this.writing
+      .then(() => p.write(changed, dirty, () => this.entries.values()))
+      .catch((e) => {
+        console.error('Could not save to the phone', e);
+        ids.forEach((id) => this.unsaved.add(id)); // retry on the next change
+      });
+    return this.writing;
   }
 
   get(id: string) {
@@ -131,7 +172,7 @@ class Store {
       this.entries.set(e.id, stamped);
       this.dirty.add(e.id);
     }
-    this.changed();
+    this.changed(list.map((e) => e.id));
     this.onDirty?.();
   }
 
@@ -146,19 +187,19 @@ class Store {
 
   /** Apply entries from the server. Returns true if anything changed. */
   merge(remote: Entry[]): boolean {
-    let changed = false;
+    const changedIds: string[] = [];
     for (const r of remote) {
       const local = this.entries.get(r.id);
       if (!local || r.updatedAt > local.updatedAt) {
         this.entries.set(r.id, r);
         this.dirty.delete(r.id);
-        changed = true;
+        changedIds.push(r.id);
       } else if (r.updatedAt === local.updatedAt) {
         this.dirty.delete(r.id);
       }
     }
-    if (changed) this.changed();
-    return changed;
+    if (changedIds.length) this.changed(changedIds);
+    return changedIds.length > 0;
   }
 
   dirtyEntries(): Entry[] {
@@ -169,13 +210,13 @@ class Store {
       // only clear if not edited again while the push was in flight
       if (this.entries.get(id)?.updatedAt === pushed.get(id)) this.dirty.delete(id);
     }
-    save(K.dirty, [...this.dirty]);
+    this.changed([]); // persists the shorter dirty list
   }
 
   setDevice(patch: Partial<DeviceSettings>) {
     this.device = { ...this.device, ...patch };
     save(K.device, this.device);
-    this.changed(false);
+    this.changed();
   }
   getDevice() {
     return this.device;
@@ -183,25 +224,28 @@ class Store {
 
   setSync(info: Partial<Snapshot['sync']>) {
     this.syncInfo = { ...this.syncInfo, ...info };
-    this.changed(false);
+    this.changed();
   }
 
   /** Replace everything (used by "import backup"). */
   importEntries(list: Entry[]) {
     const now = Date.now();
+    const ids: string[] = [];
     for (const e of list) {
       const existing = this.entries.get(e.id);
       if (!existing || e.updatedAt >= existing.updatedAt) {
         this.entries.set(e.id, { ...e, updatedAt: Math.max(now, e.updatedAt) } as Entry);
         this.dirty.add(e.id);
+        ids.push(e.id);
       }
     }
-    this.changed();
+    this.changed(ids);
     this.onDirty?.();
   }
 
   /** Write any recurring expenses that have fallen due. */
   async generateRecurring() {
+    await this.ready;
     const settings = this.settings();
     const t = today();
     for (const r of this.getSnapshot().recurring) {
@@ -238,4 +282,8 @@ export function useStore(): Snapshot {
   return useSyncExternalStore(store.subscribe, store.getSnapshot);
 }
 
-window.addEventListener('pagehide', () => store.flush());
+// Save immediately when the app is backgrounded or closed.
+window.addEventListener('pagehide', () => void store.flush());
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') void store.flush();
+});

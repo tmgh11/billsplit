@@ -85,7 +85,8 @@ src/lib/          plain TypeScript logic (unit-tested in lib.test.ts)
   receipt.ts      image clean-up, Tesseract OCR, line/price parser
   categories.ts   categories, keyword auto-categorisation, learned rules
   fx.ts           ExchangeRate-API with offline cache
-  store.ts        local-first store (localStorage) with change queue
+  store.ts        local-first store with change queue
+  persist.ts      phone storage (IndexedDB, migrates older localStorage data)
   sync.ts         Supabase push/pull + realtime, last-write-wins
   splitwise.ts    Splitwise CSV import
 src/components/   screens and sheets (React)
