@@ -146,9 +146,10 @@ let pushToast: ((t: ToastMsg) => void) | null = null;
 interface ToastMsg {
   text: string;
   action?: { label: string; run: () => void };
+  ms?: number;
 }
-export function toast(text: string, action?: ToastMsg['action']) {
-  pushToast?.({ text, action });
+export function toast(text: string, action?: ToastMsg['action'], ms?: number) {
+  pushToast?.({ text, action, ms });
 }
 export function ToastHost() {
   const [msg, setMsg] = useState<ToastMsg | null>(null);
@@ -157,7 +158,7 @@ export function ToastHost() {
     pushToast = (m) => {
       setMsg(m);
       clearTimeout(timer);
-      timer = window.setTimeout(() => setMsg(null), m.action ? 5000 : 2400);
+      timer = window.setTimeout(() => setMsg(null), m.ms ?? (m.action ? 5000 : 2400));
     };
     return () => {
       pushToast = null;

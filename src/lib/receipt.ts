@@ -93,19 +93,59 @@ export function receiptTotals(items: ReceiptItem[]) {
   };
 }
 
+const MAX_SIDE = 2000;
+
+function scaledCanvas(src: CanvasImageSource, width: number, height: number): HTMLCanvasElement {
+  if (!width || !height) throw new Error('image has no size');
+  const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) throw new Error('canvas unavailable');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+/**
+ * Decode the photo straight to a small canvas. Modern phone cameras produce 12–50 MP images;
+ * decoding those at full size can exhaust a mobile browser's memory, so we try the most
+ * memory-friendly decoders first and fall back through the others.
+ */
+async function decodeToCanvas(file: Blob): Promise<HTMLCanvasElement> {
+  const errors: string[] = [];
+  // 1. <img>: honours EXIF rotation, and browsers decode big JPEGs into a scaled draw efficiently
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = url;
+    await img.decode();
+    return scaledCanvas(img, img.naturalWidth, img.naturalHeight);
+  } catch (e) {
+    errors.push(`img: ${(e as Error)?.message ?? e}`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+  // 2. createImageBitmap, asking the decoder to downscale as it goes
+  try {
+    const probe = await createImageBitmap(file, { resizeWidth: 1600, resizeQuality: 'high', imageOrientation: 'from-image' });
+    const c = scaledCanvas(probe, probe.width, probe.height);
+    probe.close?.();
+    return c;
+  } catch (e) {
+    errors.push(`bitmap: ${(e as Error)?.message ?? e}`);
+  }
+  throw new Error(`Couldn’t open that photo (${errors.join('; ')})`);
+}
+
 /** Downscale, greyscale and boost contrast – markedly improves Tesseract accuracy on phone photos. */
 export async function preprocessImage(file: Blob): Promise<HTMLCanvasElement> {
-  const bitmap = await createImageBitmap(file);
-  const maxSide = 2200;
-  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
-  const w = Math.round(bitmap.width * scale);
-  const h = Math.round(bitmap.height * scale);
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
+  const canvas = await decodeToCanvas(file);
+  const w = canvas.width;
+  const h = canvas.height;
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  ctx.drawImage(bitmap, 0, 0, w, h);
-  bitmap.close?.();
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
   // luminance histogram for auto-levels

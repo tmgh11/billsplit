@@ -45,10 +45,11 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
       setPrintedTotal(parsed.printedTotal);
       if (parsed.merchant) setCategory(guessCategory(parsed.merchant, settings.categoryRules) ?? 'groceries');
       setStage('review');
-      if (!parsed.items.length) toast('Couldn’t find any prices — add the items by hand');
+      if (!parsed.items.length) toast('Couldn’t find any prices — add the items by hand', undefined, 5000);
     } catch (e) {
       console.error(e);
-      toast('Scan failed — try a flatter, brighter photo');
+      const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e);
+      toast(`Scan failed: ${msg.slice(0, 140)}`, undefined, 8000);
       setStage('pick');
     }
   };
