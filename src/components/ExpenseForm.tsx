@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
+import { DateHint, Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
 import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
-import { fmt, parseMoney, pctForSplit, round2 } from '../lib/money';
-import { today } from '../lib/dates';
+import { fmt, isValidAmount, parseMoney, pctForSplit, round2 } from '../lib/money';
+import { isISODate, today } from '../lib/dates';
 import {
   addedUntil,
   describeFrequency,
@@ -63,8 +63,14 @@ export function ExpenseForm(props: Props) {
   const [clashes, setClashes] = useState<Clash[] | null>(null);
   useEffect(() => setClashes(null), [frequency, startDate, dates]);
 
+  /** id for a new entry, fixed when the sheet opens so a double tap on Save can't add it twice */
+  const [draftId] = useState(newId);
+
   const amount = parseMoney(amountText);
-  const valid = Number.isFinite(amount) && amount > 0 && description.trim().length > 0 && (!repeat || frequency !== 'dates' || dates.length > 0);
+  // iOS's date picker has a Reset button that leaves the field empty
+  const dateOk = isRecurring ? frequency === 'dates' || isISODate(startDate) : isISODate(date);
+  const valid =
+    isValidAmount(amount) && description.trim().length > 0 && dateOk && (!repeat || frequency !== 'dates' || dates.length > 0);
 
   // auto-category from the description until the user picks one
   useEffect(() => {
@@ -79,7 +85,11 @@ export function ExpenseForm(props: Props) {
       setRate(1);
       return;
     }
-    if (init && 'rate' in init && init.currency === currency) return;
+    // back to the expense's own currency: restore the rate it was saved with
+    if (init && 'rate' in init && init.currency === currency) {
+      setRate(init.rate);
+      return;
+    }
     let live = true;
     setRate(null);
     rateToBase(currency, base).then((r) => live && setRate(r));
@@ -147,7 +157,7 @@ export function ExpenseForm(props: Props) {
       tomPct: effPct,
     };
     if (isRecurring || (repeat && !isEdit)) {
-      const recId = recInit?.id ?? newId();
+      const recId = recInit?.id ?? draftId;
       const anchor = isRecurring ? startDate : date;
       const rec: Recurring = {
         ...(recInit ?? {}),
@@ -191,7 +201,7 @@ export function ExpenseForm(props: Props) {
       const e: Expense = {
         ...(init as Expense | undefined),
         ...common,
-        id: init?.id ?? newId(),
+        id: init?.id ?? draftId,
         kind: 'expense',
         date,
         rate: r!,
@@ -432,6 +442,7 @@ export function ExpenseForm(props: Props) {
         <div className="field">
           <label htmlFor="date">Date</label>
           <input id="date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DateHint value={date} />
         </div>
       )}
 
@@ -491,6 +502,7 @@ export function ExpenseForm(props: Props) {
                     First / next date
                   </label>
                   <input id="start" type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                  <DateHint value={startDate} />
                 </div>
               )}
               <div>

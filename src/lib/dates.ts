@@ -13,6 +13,9 @@ export function fromISO(s: string): Date {
 
 export const today = () => toISO(new Date());
 
+/** A real calendar date as YYYY-MM-DD (a cleared date input gives ''). */
+export const isISODate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s) && toISO(fromISO(s)) === s;
+
 /**
  * A Postgres timestamp (e.g. "2026-09-27T20:01:02.123456+00:00") moved back by `ms`, as an ISO
  * string. Fractional seconds are cut to milliseconds first, since Safari won't parse more digits.

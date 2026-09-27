@@ -2,6 +2,9 @@ import type { Expense, Person, Settlement, SplitMode } from './types';
 
 export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
 
+/** At least 1p once rounded to pence (so "0.004" doesn't save as a £0.00 expense). */
+export const isValidAmount = (n: number) => Number.isFinite(n) && round2(n) >= 0.01;
+
 export function pctForSplit(split: SplitMode, tomPct: number): number {
   if (split === 'equal') return 50;
   if (split === 'tom') return 100;

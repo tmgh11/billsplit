@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { balance, describeBalance, parseMoney, shares } from './money';
+import { balance, describeBalance, isValidAmount, parseMoney, shares } from './money';
 import {
   GENERATED_STAMP,
   addedUntil,
@@ -14,7 +14,7 @@ import {
 import { guessCategory, learnRule } from './categories';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise } from './splitwise';
-import { rewindTimestamp } from './dates';
+import { isISODate, rewindTimestamp } from './dates';
 import { mergeLegacy } from './persist';
 import type { Expense, Recurring, Settlement } from './types';
 
@@ -53,6 +53,23 @@ describe('balance', () => {
   });
   it('ignores deleted', () => {
     expect(balance([exp({ deleted: true })], [])).toBe(0);
+  });
+});
+
+describe('input checks', () => {
+  it('amount must be at least 1p once rounded', () => {
+    expect(isValidAmount(0.01)).toBe(true);
+    expect(isValidAmount(0.005)).toBe(true); // rounds to 1p
+    expect(isValidAmount(0.004)).toBe(false);
+    expect(isValidAmount(0)).toBe(false);
+    expect(isValidAmount(-5)).toBe(false);
+    expect(isValidAmount(parseMoney(''))).toBe(false);
+  });
+  it('dates must be real YYYY-MM-DD dates', () => {
+    expect(isISODate('2026-09-27')).toBe(true);
+    expect(isISODate('')).toBe(false); // iOS date picker "Reset"
+    expect(isISODate('2026-02-30')).toBe(false);
+    expect(isISODate('27/09/2026')).toBe(false);
   });
 });
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Icon, Sheet, haptic, toast } from './ui';
-import { balance, describeBalance, fmt, parseMoney, round2 } from '../lib/money';
-import { today } from '../lib/dates';
+import { DateHint, Icon, Sheet, haptic, toast } from './ui';
+import { balance, describeBalance, fmt, isValidAmount, parseMoney, round2 } from '../lib/money';
+import { isISODate, today } from '../lib/dates';
 import { newId, store, useStore } from '../lib/store';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import type { Person, Settlement } from '../lib/types';
@@ -23,16 +23,24 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
   const [date, setDate] = useState(initial?.date ?? today());
   const [note, setNote] = useState(initial?.note ?? '');
 
+  /** id for a new payment, fixed when the sheet opens so a double tap can't record it twice */
+  const [draftId] = useState(newId);
+
   useEffect(() => {
     if (currency === base) return setRate(1);
-    if (initial && initial.currency === currency) return;
+    // back to the payment's own currency: restore the rate it was saved with
+    if (initial && initial.currency === currency) return setRate(initial.rate);
+    let live = true;
     setRate(null);
-    rateToBase(currency, base).then(setRate);
+    rateToBase(currency, base).then((r) => live && setRate(r));
+    return () => {
+      live = false; // a slower lookup for a currency no longer picked mustn't overwrite the rate
+    };
   }, [currency, base, initial]);
 
   const amount = parseMoney(amountText);
   const inBase = rate && Number.isFinite(amount) ? amount * rate : 0;
-  const valid = Number.isFinite(amount) && amount > 0 && rate != null;
+  const valid = isValidAmount(amount) && rate != null && isISODate(date);
   const remaining = owing ? (owing.debtor === from ? owing.amount - inBase : -(owing.amount + inBase)) : -inBase;
 
   const setPortion = (f: number) => {
@@ -43,7 +51,7 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
   const save = () => {
     if (!valid) return;
     const s: Settlement = {
-      id: initial?.id ?? newId(),
+      id: initial?.id ?? draftId,
       kind: 'settlement',
       date,
       from,
@@ -157,6 +165,7 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
         <div className="field">
           <label htmlFor="sdate">Date</label>
           <input id="sdate" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DateHint value={date} />
         </div>
         <div className="field">
           <label htmlFor="snote">Note</label>

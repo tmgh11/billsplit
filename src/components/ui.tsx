@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { isISODate } from '../lib/dates';
 
 type IconName =
   | 'plus' | 'camera' | 'arrows' | 'repeat' | 'chart' | 'list' | 'settings' | 'close' | 'trash' | 'check'
@@ -179,6 +180,16 @@ export function ToastHost() {
         </button>
       )}
     </div>
+  );
+}
+
+/** Shown under a date input left empty (iOS's date picker has a Reset button). */
+export function DateHint({ value }: { value: string }) {
+  if (isISODate(value)) return null;
+  return (
+    <p className="small-print" style={{ color: 'var(--danger)' }} role="alert">
+      Pick a date
+    </p>
   );
 }
 

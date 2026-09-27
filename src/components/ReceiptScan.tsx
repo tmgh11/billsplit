@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { Icon, Seg, Sheet, haptic, toast } from './ui';
+import { DateHint, Icon, Seg, Sheet, haptic, toast } from './ui';
 import { ReceiptReader, mergeParts, receiptTotals, type ParsedReceipt } from '../lib/receipt';
 import { fmt, parseMoney, round2 } from '../lib/money';
-import { today } from '../lib/dates';
+import { isISODate, today } from '../lib/dates';
 import { CATEGORIES, guessCategory } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import { newId, store, useStore } from '../lib/store';
@@ -35,6 +35,9 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
   const [basketDiscount, setBasketDiscount] = useState(0);
   const [parts, setParts] = useState(0);
   const [busy, setBusy] = useState(false); // reading an extra part while the list stays on screen
+  const [saving, setSaving] = useState(false);
+  /** id for the expense, fixed when the sheet opens so it can only ever be added once */
+  const [draftId] = useState(newId);
 
   useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview]);
   useEffect(() => () => void reader.current?.dispose(), []);
@@ -130,17 +133,22 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
     setItems((l) => l.map((i) => ({ ...i, owner })));
   };
 
+  const canAdd = t.total > 0 && isISODate(date) && !saving;
+
   const addToLedger = async () => {
-    if (t.total <= 0) return;
+    if (!canAdd) return;
+    // the rate lookup can take a moment online; don't let a second tap start another save
+    setSaving(true);
     const rate = await rateToBase(currency, base);
     if (rate == null) {
+      setSaving(false);
       toast('No exchange rate available offline');
       return;
     }
     const tomPct = t.total ? (t.tomShare / t.total) * 100 : 50;
     const split = Math.abs(tomPct - 50) < 1e-9 ? 'equal' : tomPct >= 100 - 1e-9 ? 'tom' : tomPct <= 1e-9 ? 'nuria' : 'custom';
     const e: Expense = {
-      id: newId(),
+      id: draftId,
       kind: 'expense',
       date,
       description: merchant.trim() || 'Receipt',
@@ -183,7 +191,7 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
                 Total<strong>{fmt(t.total, currency)}</strong>
               </div>
             </div>
-            <button className="btn primary" disabled={t.total <= 0} onClick={addToLedger}>
+            <button className="btn primary" disabled={!canAdd} onClick={addToLedger}>
               Add to ledger{owed >= 0.005 ? ` · ${names[debtor]} owes ${fmt(owed, currency)}` : ''}
             </button>
           </>
@@ -373,6 +381,7 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
             <div className="field">
               <label htmlFor="rdate">Date</label>
               <input id="rdate" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+              <DateHint value={date} />
             </div>
             <div className="field">
               <label htmlFor="rcur">Currency</label>
