@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { balance, describeBalance, parseMoney, shares } from './money';
 import { occurrences, dueExpenses } from './recurring';
 import { guessCategory, learnRule } from './categories';
-import { parseReceiptText, receiptTotals } from './receipt';
+import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise } from './splitwise';
 import type { Expense, Recurring, Settlement } from './types';
 
@@ -110,26 +110,140 @@ TOTAL   13.17
 VISA CONTACTLESS 13.17
 CHANGE 0.00
 12/09/2026 14:32`;
-  it('extracts items, discounts and printed total', () => {
+  it('extracts items, folds a discount into its item, reads the printed total', () => {
     const r = parseReceiptText(text);
     expect(r.merchant).toBe('Tesco');
     expect(r.items.map((i) => [i.name, i.price])).toEqual([
       ['Milk Semi Skimmed 2pt', 1.45],
       ['Sourdough Loaf', 2.8],
-      ['Bananas Loose', 0.92],
-      ['Clubcard Price', -0.5],
+      ['Bananas Loose', 0.42],
       ['Red Wine Malbec', 8.5],
     ]);
     expect(r.printedTotal).toBe(13.17);
+    expect(totalsMatch(r)).toBe(true);
   });
   it('totals by owner', () => {
     const r = parseReceiptText(text);
-    r.items[4].owner = 'tom';
+    r.items[3].owner = 'tom';
     r.items[0].owner = 'nuria';
     const t = receiptTotals(r.items);
     expect(t.total).toBe(13.17);
-    expect(t.tomShare).toBeCloseTo(8.5 + (2.8 + 0.92 - 0.5) / 2);
+    expect(t.tomShare).toBeCloseTo(8.5 + (2.8 + 0.42) / 2);
     expect(t.tomShare + t.nuriaShare).toBeCloseTo(13.17);
+  });
+
+  it('ASDA: ignores tax summary, card slip and header noise', () => {
+    const asda = `ASDA
+ASDA STORES LTD
+WWW.ASDA.COM
+MANAGER JONATHAN SORRELL
+Al - Oxford,
+ST. 4442 OP. 44420366 TE. 70 TR. 7685
+GH Throw £5.50
+HAND TOWEL £3.00
+TOTAL: £8.50
+NO. ITEMS SOLD 2
+CARD £8.50
+TAX SUMMARY
+RATE NET VAT
+20.00% 7.08 1.42
+TAX TOTAL: 1.42
+AID: A0000000041010
+MASTERCARD`;
+    const r = parseReceiptText(asda.replace('HAND TOWEL', 'ro HAND TOWEL'));
+    expect(r.merchant).toBe('ASDA');
+    expect(r.items.map((i) => [i.name, i.price])).toEqual([['GH Throw', 5.5], ['Hand Towel', 3]]);
+    expect(r.printedTotal).toBe(8.5);
+    expect(totalsMatch(r)).toBe(true);
+  });
+
+  it('Pets at Home: barcodes, per-item discounts, "1 @" lines, basket saving after subtotal', () => {
+    const pets = `VAT Identification Number: GB 616 43 17 54
+SALE
+Pets Club No.: 1097
+***STD 3 FOR £3***
+5998749122228 DREAMIES TUNA 60G £1.69
+Discount: -£0.69
+Coupon 5054693135742
+5998749116500 DREAMIES DUCK 60 £1.69
+Discount: -£0.69
+Coupon 5054693135742
+4008429037962 DREAMIES 60G SAL £1.69
+Discount: -£0.69
+Coupon 5054693135742
+Package Price: £3.00
+5063179020281 PAH Reflective Wing £3.00
+1 @ £3.00
+Coupon 5054693135742
+5038124247570 Cute Corn And Carro £2.00
+1 @ £2.00
+5038124293577 Pah Woollen Ball £2.30
+1 @ £2.30
+5063179045505 Pah Shrimp Cat Toy £3.00
+1 @ £3.00
+5038124801069 Brown Cat Blanket £4.00
+1 @ £4.00
+5063179038910 Pah Hw Spider Teaser £4.00
+1 @ £4.00
+**Pets Card Swiped**
+Subtotal £21.30
+CLB SAVE 10% -£2.13
+Total £19.17
+You saved £2.07 today with Pets Club.
+You saved £4.20
+MasterCard £19.17`;
+    const r = parseReceiptText(pets);
+    expect(r.merchant).toBe('Pets at Home');
+    expect(r.items.map((i) => [i.name, i.price])).toEqual([
+      ['Dreamies Tuna 60g', 1],
+      ['Dreamies Duck 60', 1],
+      ['Dreamies 60g Sal', 1],
+      ['PAH Reflective Wing', 3],
+      ['Cute Corn And Carro', 2],
+      ['Pah Woollen Ball', 2.3],
+      ['Pah Shrimp Cat Toy', 3],
+      ['Brown Cat Blanket', 4],
+      ['Pah Hw Spider Teaser', 4],
+    ]);
+    expect(r.basketDiscount).toBe(-2.13);
+    expect(r.printedTotal).toBe(19.17);
+    expect(totalsMatch(r)).toBe(true);
+    // 10% club saving comes off each person's share in proportion
+    r.items[7].owner = 'tom'; // £4 blanket
+    const t = receiptTotals(r.items, r.basketDiscount);
+    expect(t.total).toBe(19.17);
+    expect(t.tomShare + t.nuriaShare).toBeCloseTo(19.17);
+    expect(Math.abs(t.tomShare - (4 + 17.3 / 2) * (19.17 / 21.3))).toBeLessThan(0.006); // rounded to the penny
+  });
+
+  it('tolerates OCR letter/digit swaps in prices', () => {
+    const r = parseReceiptText('SPINACH 200G 1.4O\nRED ONIONS O.89\nTOTAL 2.29');
+    expect(r.items.map((i) => i.price)).toEqual([1.4, 0.89]);
+  });
+});
+
+describe('joining photos of a long receipt', () => {
+  const it_ = (name: string, price: number) => ({ id: name, name, price, owner: 'shared' as const });
+  const A = ['Milk', 'Bread', 'Eggs', 'Cheese', 'Wine', 'Shaving Gel'].map((n, i) => it_(n, i + 1));
+  it('drops the overlapping lines (with OCR noise on the repeats)', () => {
+    const B = [it_('Chese', 4), it_('Wine', 5), it_('Shaving Gel', 6), it_('Toothpaste', 7), it_('Pesto', 8)];
+    const m = mergeParts(A, B);
+    expect(m.overlapFound).toBe(true);
+    expect(m.items.map((i) => i.name)).toEqual(['Milk', 'Bread', 'Eggs', 'Cheese', 'Wine', 'Shaving Gel', 'Toothpaste', 'Pesto']);
+  });
+  it('handles a half-cut first line in the new photo', () => {
+    const B = [it_('~~ ~', 0.5), it_('Wine', 5), it_('Shaving Gel', 6), it_('Pesto', 8)];
+    expect(mergeParts(A, B).items.map((i) => i.name)).toEqual(['Milk', 'Bread', 'Eggs', 'Cheese', 'Wine', 'Shaving Gel', 'Pesto']);
+  });
+  it('replaces a half-cut last line of the previous photo', () => {
+    const A2 = [...A.slice(0, 5), it_('Shav', 0.6)];
+    const B = [it_('Cheese', 4), it_('Wine', 5), it_('Shaving Gel', 6), it_('Pesto', 8)];
+    expect(mergeParts(A2, B).items.map((i) => i.name)).toEqual(['Milk', 'Bread', 'Eggs', 'Cheese', 'Wine', 'Shaving Gel', 'Pesto']);
+  });
+  it('just appends when there is no overlap', () => {
+    const m = mergeParts(A, [it_('Pesto', 8)]);
+    expect(m.overlapFound).toBe(false);
+    expect(m.items).toHaveLength(7);
   });
 });
 
@@ -161,5 +275,22 @@ describe('nextOccurrence', () => {
     const r = { id: 'x', kind: 'recurring', description: '', category: 'other', amount: 1, currency: 'GBP', paidBy: 'tom', split: 'equal', tomPct: 50,
       frequency: 'monthly', startDate: '2026-09-27', generatedUntil: '2026-09-27', updatedAt: 1 } as const;
     expect(nextOccurrence(r as never, '2026-09-27')).toBe('2026-10-27');
+  });
+});
+
+describe('total cross-checks', () => {
+  it('uses the card payment line when the bold TOTAL is misread', () => {
+    const r = parseReceiptText('WINE 7.00\nCHEESE 3.50\nTOTAL 0.50\nVISA CONTACTLESS 10.50');
+    expect(r.printedTotal).toBe(10.5);
+    expect(totalsMatch(r)).toBe(true);
+  });
+  it('ignores OCR-mangled subtotal lines', () => {
+    const r = parseReceiptText('WINE 7.00\nJ Subtotil 7.00\nT0TAL 7.00');
+    expect(r.items.map((i) => i.name)).toEqual(['Wine']);
+    expect(r.printedTotal).toBe(7);
+  });
+  it('drops an impossible total rather than raising a false warning', () => {
+    const r = parseReceiptText('WINE 7.00\nCHEESE 3.50\nTOTAL 0.50');
+    expect(r.printedTotal).toBe(null);
   });
 });

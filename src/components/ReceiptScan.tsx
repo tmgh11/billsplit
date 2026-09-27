@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon, Seg, Sheet, haptic, toast } from './ui';
-import { parseReceiptText, receiptTotals, recogniseReceipt } from '../lib/receipt';
+import { ReceiptReader, mergeParts, receiptTotals, type ParsedReceipt } from '../lib/receipt';
 import { fmt, parseMoney, round2 } from '../lib/money';
 import { today } from '../lib/dates';
 import { CATEGORIES, guessCategory } from '../lib/categories';
@@ -17,6 +17,9 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
   const base = settings.baseCurrency;
   const fileRef = useRef<HTMLInputElement>(null); // photo library
   const cameraRef = useRef<HTMLInputElement>(null); // opens the camera directly
+  const nextFileRef = useRef<HTMLInputElement>(null); // next part of a long receipt
+  const nextCameraRef = useRef<HTMLInputElement>(null);
+  const reader = useRef<ReceiptReader | null>(null);
 
   const [stage, setStage] = useState<Stage>('pick');
   const [progress, setProgress] = useState({ p: 0, label: '' });
@@ -29,28 +32,78 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
   const [currency, setCurrency] = useState(base);
   const [date, setDate] = useState(today());
   const [category, setCategory] = useState('groceries');
+  const [basketDiscount, setBasketDiscount] = useState(0);
+  const [parts, setParts] = useState(0);
+  const [busy, setBusy] = useState(false); // reading an extra part while the list stays on screen
 
   useEffect(() => () => void (preview && URL.revokeObjectURL(preview)), [preview]);
+  useEffect(() => () => void reader.current?.dispose(), []);
 
+  const getReader = () => (reader.current ??= new ReceiptReader());
+
+  const showError = (e: unknown) => {
+    console.error(e);
+    const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e);
+    toast(`Scan failed: ${msg.slice(0, 140)}`, undefined, 8000);
+  };
+
+  const setPrices = (list: ReceiptItem[]) =>
+    setPriceText((p) => ({ ...p, ...Object.fromEntries(list.map((i) => [i.id, i.price.toFixed(2)])) }));
+
+  /** First (or replacement) photo. */
   const onFile = async (file: File | undefined) => {
     if (!file) return;
     setPreview(URL.createObjectURL(file));
     setStage('reading');
     try {
-      const text = await recogniseReceipt(file, (p, label) => setProgress({ p, label }));
-      const parsed = parseReceiptText(text);
+      const parsed = await getReader().read(file, (p, label) => setProgress({ p, label }));
       setItems(parsed.items);
-      setPriceText(Object.fromEntries(parsed.items.map((i) => [i.id, i.price.toFixed(2)])));
+      setPriceText({});
+      setPrices(parsed.items);
       setMerchant(parsed.merchant);
       setPrintedTotal(parsed.printedTotal);
+      setBasketDiscount(parsed.basketDiscount);
+      setParts(1);
       if (parsed.merchant) setCategory(guessCategory(parsed.merchant, settings.categoryRules) ?? 'groceries');
       setStage('review');
       if (!parsed.items.length) toast('Couldn’t find any prices — add the items by hand', undefined, 5000);
     } catch (e) {
-      console.error(e);
-      const msg = e instanceof Error ? e.message : String((e as { message?: string })?.message ?? e);
-      toast(`Scan failed: ${msg.slice(0, 140)}`, undefined, 8000);
+      showError(e);
       setStage('pick');
+    }
+  };
+
+  /** Next section of a long receipt: append, dropping the lines both photos share. */
+  const onNextPart = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setProgress({ p: 0, label: 'Starting' });
+    const before = { items, printedTotal, basketDiscount, parts };
+    try {
+      const parsed: ParsedReceipt = await getReader().read(file, (p, label) => setProgress({ p, label }), items);
+      const merged = mergeParts(items, parsed.items);
+      setItems(merged.items);
+      setPrices(parsed.items);
+      if (parsed.printedTotal != null) setPrintedTotal(parsed.printedTotal);
+      if (parsed.basketDiscount) setBasketDiscount(parsed.basketDiscount);
+      setParts((n) => n + 1);
+      const added = merged.items.length - before.items.length;
+      const msg = merged.overlapFound
+        ? `Added ${Math.max(0, added)} line${added === 1 ? '' : 's'} · skipped ${merged.skipped} already in the last photo`
+        : `Added ${parsed.items.length} lines — no overlap found, check for duplicates`;
+      toast(msg, {
+        label: 'Undo',
+        run: () => {
+          setItems(before.items);
+          setPrintedTotal(before.printedTotal);
+          setBasketDiscount(before.basketDiscount);
+          setParts(before.parts);
+        },
+      });
+    } catch (e) {
+      showError(e);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -68,7 +121,7 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
     setPriceText((p) => ({ ...p, [id]: '' }));
   };
 
-  const t = receiptTotals(items);
+  const t = receiptTotals(items, basketDiscount);
   const owed = paidBy === 'tom' ? t.nuriaShare : t.tomShare;
   const debtor: Person = paidBy === 'tom' ? 'nuria' : 'tom';
   const mismatch = printedTotal != null && Math.abs(printedTotal - t.total) > 0.009;
@@ -98,7 +151,10 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
       paidBy,
       split,
       tomPct,
-      items: items.filter((i) => i.name || i.price).map((i) => ({ ...i, price: round2(i.price) })),
+      items: [
+        ...items.filter((i) => i.name || i.price).map((i) => ({ ...i, price: round2(i.price) })),
+        ...(basketDiscount ? [{ id: uid(), name: 'Basket discount (split in proportion)', price: basketDiscount, owner: 'shared' as const }] : []),
+      ],
       createdBy: device.me,
       updatedAt: 0,
     };
@@ -134,16 +190,24 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
         ) : undefined
       }
     >
-      {[fileRef, cameraRef].map((ref, i) => (
+      {(
+        [
+          [fileRef, false, 'first', onFile],
+          [cameraRef, true, 'first', onFile],
+          [nextFileRef, false, 'next', onNextPart],
+          [nextCameraRef, true, 'next', onNextPart],
+        ] as const
+      ).map(([ref, camera, part, handler], i) => (
         <input
           key={i}
           ref={ref}
           type="file"
           accept="image/*"
-          {...(ref === cameraRef ? { capture: 'environment' as const } : {})}
+          data-part={part}
+          {...(camera ? { capture: 'environment' as const } : {})}
           hidden
           onChange={(e) => {
-            void onFile(e.target.files?.[0]);
+            void handler(e.target.files?.[0]);
             e.target.value = '';
           }}
         />
@@ -248,9 +312,52 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
             ))}
+            {basketDiscount !== 0 && (
+              <div className="r-item">
+                <div className="r-top">
+                  <div className="name" style={{ fontSize: 14 }}>
+                    <strong>Basket discount</strong>
+                    <div className="muted" style={{ fontSize: 12.5 }}>Split in proportion to what each of you bought</div>
+                  </div>
+                  <span className="num good" style={{ fontWeight: 700 }}>{fmt(basketDiscount, currency)}</span>
+                  <button className="icon-btn" style={{ marginTop: 0 }} aria-label="Remove basket discount" onClick={() => setBasketDiscount(0)}>
+                    <Icon name="trash" size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
             <button className="btn" style={{ margin: '10px 0', minHeight: 44 }} onClick={addRow}>
               <Icon name="plus" size={18} /> Add item
             </button>
+          </div>
+
+          <div className="card pad" style={{ marginTop: 12, padding: 14 }}>
+            {busy ? (
+              <>
+                <div style={{ fontWeight: 650, marginBottom: 8 }}>Reading part {parts + 1}…</div>
+                <div className="progress" aria-label="Scanning progress">
+                  <div style={{ width: `${Math.round(progress.p * 100)}%` }} />
+                </div>
+                <p className="small-print" style={{ margin: '8px 0 0' }}>{progress.label} {Math.round(progress.p * 100)}%</p>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 650 }}>
+                  {parts > 1 ? `${parts} photos joined` : 'Receipt longer than one photo?'}
+                </div>
+                <p className="small-print" style={{ margin: '4px 0 10px' }}>
+                  Photograph the next section, overlapping the last few lines. Lines in both photos are only counted once.
+                </p>
+                <div className="btn-row">
+                  <button className="btn small" style={{ flex: 1 }} onClick={() => nextCameraRef.current?.click()}>
+                    <Icon name="camera" size={17} /> Take photo
+                  </button>
+                  <button className="btn small" style={{ flex: 1 }} onClick={() => nextFileRef.current?.click()}>
+                    <Icon name="upload" size={17} /> From photos
+                  </button>
+                </div>
+              </>
+            )}
           </div>
 
           {mismatch && (
@@ -286,10 +393,10 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
           </div>
           <div className="btn-row">
             <button className="btn" onClick={() => cameraRef.current?.click()}>
-              <Icon name="camera" size={18} /> Retake
+              <Icon name="camera" size={18} /> Start again
             </button>
             <button className="btn" onClick={() => fileRef.current?.click()}>
-              <Icon name="upload" size={18} /> Choose photo
+              <Icon name="upload" size={18} /> Different photo
             </button>
           </div>
         </>
