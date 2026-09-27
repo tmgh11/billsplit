@@ -1,5 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { balance, describeBalance, isValidAmount, parseMoney, shares } from './money';
+import {
+  balance,
+  basePence,
+  describeBalance,
+  expenseEffect,
+  hasOddPenny,
+  isValidAmount,
+  oddPennyTo,
+  parseMoney,
+  pctForSplit,
+  shares,
+  sharesPence,
+  toPence,
+} from './money';
 import {
   GENERATED_STAMP,
   addedUntil,
@@ -53,6 +66,82 @@ describe('balance', () => {
   });
   it('ignores deleted', () => {
     expect(balance([exp({ deleted: true })], [])).toBe(0);
+  });
+});
+
+describe('money in whole pence', () => {
+  const rid = () => Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+
+  it('turns pounds into pence without float noise', () => {
+    expect(toPence(10.01)).toBe(1001);
+    expect(toPence(1.005)).toBe(101); // 1.005 × 100 is 100.4999… in floating point
+    expect(toPence(0.1 + 0.2)).toBe(30);
+    expect(basePence({ amount: 12.34, rate: 0.8567 })).toBe(1057); // £10.571678 → 1057p, once
+  });
+
+  it('shares always add up exactly to the total, each within a penny of exact', () => {
+    for (let i = 0; i < 5000; i++) {
+      const e = {
+        id: rid(),
+        amount: Math.round(Math.random() * 100000) / 100,
+        rate: Math.random() < 0.5 ? 1 : 0.5 + Math.random(),
+        split: (['equal', 'tom', 'nuria', 'custom'] as const)[i % 4],
+        tomPct: Math.random() * 100,
+      };
+      const s = sharesPence(e);
+      expect(Number.isInteger(s.tom) && Number.isInteger(s.nuria)).toBe(true);
+      expect(s.tom + s.nuria).toBe(basePence(e));
+      expect(Math.abs(s.tom - (basePence(e) * pctForSplit(e.split, e.tomPct)) / 100)).toBeLessThanOrEqual(0.5 + 1e-9);
+    }
+  });
+
+  it('£10.01 at 50/50: the odd penny goes by id, the same every time', () => {
+    const ids = Array.from({ length: 200 }, rid);
+    const tomId = ids.find((id) => oddPennyTo(id) === 'tom')!;
+    const nuriaId = ids.find((id) => oddPennyTo(id) === 'nuria')!;
+    expect(sharesPence(exp({ id: tomId, amount: 10.01 }))).toEqual({ tom: 501, nuria: 500 });
+    expect(sharesPence(exp({ id: nuriaId, amount: 10.01 }))).toEqual({ tom: 500, nuria: 501 });
+    // editing the expense (same id) doesn't flip it
+    expect(sharesPence(exp({ id: tomId, amount: 3.33 }))).toEqual({ tom: 167, nuria: 166 });
+    expect(hasOddPenny(exp({ amount: 10.01 }))).toBe(true);
+    expect(hasOddPenny(exp({ amount: 10.02 }))).toBe(false);
+  });
+
+  it('non-half fractions round to the nearest penny, not by id', () => {
+    const e = exp({ amount: 10, split: 'custom', tomPct: 33.33 }); // 333.3p
+    expect(sharesPence(e)).toEqual({ tom: 333, nuria: 667 });
+  });
+
+  it('the odd penny is spread fairly', () => {
+    const tomShare = (ids: string[]) => ids.filter((id) => oddPennyTo(id) === 'tom').length / ids.length;
+    expect(tomShare(Array.from({ length: 4000 }, rid))).toBeGreaterThan(0.46);
+    expect(tomShare(Array.from({ length: 4000 }, rid))).toBeLessThan(0.54);
+    // a monthly repeating expense over three years
+    const months = Array.from({ length: 36 }, (_, i) => occurrenceId('k3j2h1g0f9e8d7c6b5a4', `20${26 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}-01`));
+    expect(tomShare(months)).toBeGreaterThan(0.25);
+    expect(tomShare(months)).toBeLessThan(0.75);
+  });
+
+  it('the balance is exactly the sum of what each row shows', () => {
+    const list = Array.from({ length: 50 }, (_, i) => exp({ id: rid(), amount: 10.01 + i * 0.37, paidBy: i % 3 ? 'tom' : 'nuria', rate: i % 5 ? 1 : 0.8567 }));
+    const rows = list.reduce((sum, e) => sum + toPence(expenseEffect(e)), 0);
+    expect(toPence(balance(list, []))).toBe(rows);
+    // three £10.01 at 50/50 paid by Tom: the rows and the balance agree to the penny
+    const three = Array.from({ length: 3 }, () => exp({ id: rid(), amount: 10.01 }));
+    expect(balance(three, [])).toBe(three.reduce((s, e) => s + toPence(expenseEffect(e)), 0) / 100);
+    for (const e of three) expect([5, 5.01]).toContain(expenseEffect(e));
+  });
+
+  it('a Splitwise import keeps Splitwise’s own odd penny', () => {
+    const csv = 'Date,Description,Category,Cost,Currency,Tom,Nuria\n2026-01-02,Pizza,Dining out,10.01,GBP,5.01,-5.01\n';
+    const [e] = parseSplitwise(csv).expenses;
+    expect(sharesPence({ ...e, rate: 1 })).toEqual({ tom: 500, nuria: 501 });
+  });
+
+  it('a receipt’s shared odd penny follows the same rule', () => {
+    const t = receiptTotals([{ id: 'a', name: 'Gum', price: 0.01, owner: 'shared' }]);
+    expect(t.tomExact).toBeCloseTo(0.005);
+    expect(hasOddPenny({ amount: t.total, rate: 1, split: 'equal', tomPct: 50 })).toBe(true);
   });
 });
 

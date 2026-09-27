@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DateHint, Icon, Sheet, haptic, toast } from './ui';
-import { balance, describeBalance, fmt, isValidAmount, parseMoney, round2 } from '../lib/money';
+import { balance, basePence, describeBalance, fmt, isValidAmount, parseMoney, round2, toPence } from '../lib/money';
 import { isISODate, today } from '../lib/dates';
 import { newId, store, useStore } from '../lib/store';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
@@ -39,9 +39,11 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
   }, [currency, base, initial]);
 
   const amount = parseMoney(amountText);
-  const inBase = rate && Number.isFinite(amount) ? amount * rate : 0;
   const valid = isValidAmount(amount) && rate != null && isISODate(date);
-  const remaining = owing ? (owing.debtor === from ? owing.amount - inBase : -(owing.amount + inBase)) : -inBase;
+  // worked out in pence, exactly as the balance will count it
+  const inBase = valid ? basePence({ amount: round2(amount), rate: rate! }) : 0;
+  const owed = owing ? toPence(owing.amount) : 0;
+  const remaining = (owing ? (owing.debtor === from ? owed - inBase : -(owed + inBase)) : -inBase) / 100;
 
   const setPortion = (f: number) => {
     const inCur = rate ? (fullAmount * f) / rate : 0;

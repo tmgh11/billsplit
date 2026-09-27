@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Icon } from './ui';
-import { balance, baseAmount, describeBalance, expenseEffect, fmt } from '../lib/money';
+import { balance, basePence, describeBalance, expenseEffect, fmt } from '../lib/money';
 import { monthKey, monthLabel, prettyDate } from '../lib/dates';
 import { CATEGORIES, categoryById } from '../lib/categories';
 import { useStore } from '../lib/store';
@@ -44,7 +44,7 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
       let g = out[out.length - 1];
       if (!g || g.key !== k) out.push((g = { key: k, rows: [], spend: 0 }));
       g.rows.push(r);
-      if (r.type === 'expense') g.spend += baseAmount(r.e);
+      if (r.type === 'expense') g.spend += basePence(r.e);
     }
     return out;
   }, [rows, limit]);
@@ -126,7 +126,7 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
         <div key={g.key}>
           <div className="month-head">
             <span>{monthLabel(g.key)}</span>
-            <span className="num">{fmt(g.spend, base)} spent</span>
+            <span className="num">{fmt(g.spend / 100, base)} spent</span>
           </div>
           <div className="card list">
             {g.rows.map((r) =>

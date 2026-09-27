@@ -271,7 +271,8 @@ export function receiptTotals(items: ReceiptItem[], basketDiscount = 0) {
   const gross = t.tom + t.nuria + t.shared;
   const factor = gross > 0 ? (gross + basketDiscount) / gross : 1;
   const total = round2(gross + basketDiscount);
-  const tomShare = round2((t.tom + t.shared / 2) * factor);
+  const tomExact = (t.tom + t.shared / 2) * factor;
+  const tomShare = round2(tomExact);
   return {
     tomOnly: round2(t.tom * factor),
     nuriaOnly: round2(t.nuria * factor),
@@ -279,6 +280,8 @@ export function receiptTotals(items: ReceiptItem[], basketDiscount = 0) {
     total,
     tomShare,
     nuriaShare: round2(total - tomShare),
+    /** Tom's share before rounding: saved as the split, so an odd penny follows the usual rule */
+    tomExact,
   };
 }
 

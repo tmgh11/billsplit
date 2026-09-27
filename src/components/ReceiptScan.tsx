@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { DateHint, Icon, Seg, Sheet, haptic, toast } from './ui';
 import { ReceiptReader, mergeParts, receiptTotals, type ParsedReceipt } from '../lib/receipt';
-import { fmt, parseMoney, round2 } from '../lib/money';
+import { fmt, parseMoney, round2, shares } from '../lib/money';
 import { isISODate, today } from '../lib/dates';
 import { CATEGORIES, guessCategory } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
@@ -125,7 +125,12 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
   };
 
   const t = receiptTotals(items, basketDiscount);
-  const owed = paidBy === 'tom' ? t.nuriaShare : t.tomShare;
+  const tomPct = t.total ? (t.tomExact / t.total) * 100 : 50;
+  const split = Math.abs(tomPct - 50) < 1e-9 ? 'equal' : tomPct >= 100 - 1e-9 ? 'tom' : tomPct <= 1e-9 ? 'nuria' : 'custom';
+  // The shares exactly as the ledger will count them (same maths and id; in the receipt's currency),
+  // so an odd penny from shared items goes by the usual rule rather than always to one person.
+  const s = shares({ id: draftId, amount: t.total, rate: 1, split, tomPct });
+  const owed = paidBy === 'tom' ? s.nuria : s.tom;
   const debtor: Person = paidBy === 'tom' ? 'nuria' : 'tom';
   const mismatch = printedTotal != null && Math.abs(printedTotal - t.total) > 0.009;
   const allTo = (owner: Owner) => {
@@ -145,8 +150,6 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
       toast('No exchange rate available offline');
       return;
     }
-    const tomPct = t.total ? (t.tomShare / t.total) * 100 : 50;
-    const split = Math.abs(tomPct - 50) < 1e-9 ? 'equal' : tomPct >= 100 - 1e-9 ? 'tom' : tomPct <= 1e-9 ? 'nuria' : 'custom';
     const e: Expense = {
       id: draftId,
       kind: 'expense',
@@ -182,17 +185,17 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
           <>
             <div className="totals num">
               <div className="t-tom">
-                {names.tom} pays<strong>{fmt(t.tomShare, currency)}</strong>
+                {names.tom} pays<strong>{fmt(s.tom, currency)}</strong>
               </div>
               <div className="t-nuria">
-                {names.nuria} pays<strong>{fmt(t.nuriaShare, currency)}</strong>
+                {names.nuria} pays<strong>{fmt(s.nuria, currency)}</strong>
               </div>
               <div>
                 Total<strong>{fmt(t.total, currency)}</strong>
               </div>
             </div>
             <button className="btn primary" disabled={!canAdd} onClick={addToLedger}>
-              Add to ledger{owed >= 0.005 ? ` · ${names[debtor]} owes ${fmt(owed, currency)}` : ''}
+              Add to ledger{owed > 0 ? ` · ${names[debtor]} owes ${fmt(owed, currency)}` : ''}
             </button>
           </>
         ) : undefined

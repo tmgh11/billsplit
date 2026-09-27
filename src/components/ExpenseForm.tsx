@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { DateHint, Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
 import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
-import { fmt, isValidAmount, parseMoney, pctForSplit, round2 } from '../lib/money';
+import { baseAmount, fmt, hasOddPenny, isValidAmount, parseMoney, pctForSplit, round2, shares } from '../lib/money';
 import { isISODate, today } from '../lib/dates';
 import {
   addedUntil,
@@ -103,14 +103,19 @@ export function ExpenseForm(props: Props) {
   }, [rate]);
 
   const effPct = pctForSplit(split, tomPct);
-  const baseTotal = Number.isFinite(amount) && rate ? amount * rate : 0;
-  const tomShare = (baseTotal * effPct) / 100;
-  const nuriaShare = baseTotal - tomShare;
+  // The preview uses the same maths and id the saved expense will, so it shows the exact pence
+  // (including who gets an odd penny). A new repeating expense's first entry has its own id.
+  const previewId = init?.id ?? (repeat && !isRecurring ? occurrenceId(draftId, date) : draftId);
+  const preview = { id: previewId, amount: isValidAmount(amount) ? round2(amount) : 0, rate: rate ?? 0, split, tomPct: effPct };
+  const baseTotal = baseAmount(preview);
+  const { tom: tomShare, nuria: nuriaShare } = shares(preview);
   const owed = paidBy === 'tom' ? nuriaShare : tomShare;
   const debtor: Person = paidBy === 'tom' ? 'nuria' : 'tom';
+  // each repeat has its own id, so a half-penny split alternates who pays the odd penny
+  const oddPennyVaries = isRecurring && hasOddPenny(preview);
 
   const explanation =
-    !baseTotal ? null : owed < 0.005 ? (
+    !baseTotal ? null : owed === 0 ? (
       <>
         {names[paidBy]} paid for their own thing — <strong>no one owes anything</strong>. It still counts in analytics.
       </>
@@ -118,6 +123,7 @@ export function ExpenseForm(props: Props) {
       <>
         <strong className={debtor}>{names[debtor]}</strong> owes <strong className={paidBy}>{names[paidBy]}</strong>{' '}
         <strong>{fmt(owed, base)}</strong>
+        {oddPennyVaries && ' (give or take the odd penny, which alternates)'}
       </>
     );
 
@@ -433,7 +439,7 @@ export function ExpenseForm(props: Props) {
       </div>
 
       {explanation && (
-        <div className={`note ${owed < 0.005 ? '' : debtor}`} style={{ marginBottom: 16 }}>
+        <div className={`note ${owed === 0 ? '' : debtor}`} style={{ marginBottom: 16 }}>
           <span>{explanation}</span>
         </div>
       )}
