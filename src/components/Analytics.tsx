@@ -11,7 +11,28 @@ type View = 'all' | 'tom' | 'nuria';
 export function Analytics() {
   const { expenses, settings } = useStore();
   const { names, baseCurrency: base } = settings;
-  const [month, setMonth] = useState(monthKey(today()));
+  const current = monthKey(today());
+  const [month, setMonthState] = useState(current);
+  // The chart shows 6 months ending at chartEnd. It stays put when you tap a bar,
+  // and only scrolls when you page it or pick a month (with the arrows) that's off-screen.
+  const [chartEnd, setChartEnd] = useState(current);
+  const setMonth = (m: string) => {
+    setMonthState(m);
+    const start = shiftMonth(chartEnd, -5);
+    if (m > chartEnd) setChartEnd(m);
+    else if (m < start) setChartEnd(shiftMonth(m, 5) > current ? current : shiftMonth(m, 5));
+  };
+  const pageChart = (dir: -1 | 1) => {
+    const end = shiftMonth(chartEnd, dir * 6);
+    const next = end > current ? current : end;
+    setChartEnd(next);
+    // keep the selected month visible
+    if (month > next || month < shiftMonth(next, -5)) setMonthState(next);
+  };
+  const backToNow = () => {
+    setMonthState(current);
+    setChartEnd(current);
+  };
   const [view, setView] = useState<View>('all');
   const [openCat, setOpenCat] = useState<string | null>(null);
 
@@ -35,10 +56,16 @@ export function Analytics() {
   const paidTom = list.filter((e) => e.paidBy === 'tom').reduce((s, e) => s + baseAmount(e), 0);
   const paidNuria = list.filter((e) => e.paidBy === 'nuria').reduce((s, e) => s + baseAmount(e), 0);
 
-  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(month, i - 5));
-  const series = months.map((k) => ({ key: k, v: (byMonth.get(k) ?? []).reduce((s, e) => s + value(e), 0) }));
-  const avg = series.slice(0, 5).filter((s) => s.v > 0);
-  const avgPrev = avg.length ? avg.reduce((s, x) => s + x.v, 0) / avg.length : 0;
+  const monthTotal = (k: string) => (byMonth.get(k) ?? []).reduce((s, e) => s + value(e), 0);
+  const months = Array.from({ length: 6 }, (_, i) => shiftMonth(chartEnd, i - 5));
+  const series = months.map((k) => ({ key: k, v: monthTotal(k) }));
+  // average of the 5 months before the selected one (ignoring empty months)
+  const avg = Array.from({ length: 5 }, (_, i) => monthTotal(shiftMonth(month, -1 - i))).filter((v) => v > 0);
+  const avgPrev = avg.length ? avg.reduce((s, v) => s + v, 0) / avg.length : 0;
+  const chartTitle =
+    chartEnd === current
+      ? 'Last 6 months'
+      : `${monthLabel(months[0], 'short')}${months[0].slice(0, 4) !== chartEnd.slice(0, 4) ? ` ${months[0].slice(0, 4)}` : ''} – ${monthLabel(chartEnd, 'short')} ${chartEnd.slice(0, 4)}`;
 
   const cats = useMemo(() => {
     const m = new Map<string, { v: number; items: Expense[] }>();
@@ -51,7 +78,7 @@ export function Analytics() {
     return [...m.entries()].filter(([, x]) => x.v > 0.004).sort((a, b) => b[1].v - a[1].v);
   }, [list, view]);
   const maxCat = cats[0]?.[1].v ?? 1;
-  const isCurrent = month === monthKey(today());
+  const isCurrent = month === current;
 
   return (
     <>
@@ -59,7 +86,14 @@ export function Analytics() {
         <button className="icon-btn" style={{ marginTop: 0 }} onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">
           <Icon name="left" size={18} />
         </button>
-        <h2>{monthLabel(month)}</h2>
+        <div style={{ textAlign: 'center' }}>
+          <h2>{monthLabel(month)}</h2>
+          {!isCurrent && (
+            <button className="chip" style={{ marginTop: 6, padding: '4px 10px', fontSize: 13 }} onClick={backToNow}>
+              Back to this month
+            </button>
+          )}
+        </div>
         <button
           className="icon-btn"
           style={{ marginTop: 0, opacity: isCurrent ? 0.3 : 1 }}
@@ -115,11 +149,32 @@ export function Analytics() {
       </div>
 
       <div className="section-title">
-        <span>Last 6 months</span>
-        <span className="aside">tap a bar</span>
+        <span>{chartTitle}</span>
+        <span className="aside">tap a bar to see that month</span>
       </div>
       <div className="card pad">
-        <MonthBars series={series} selected={month} onSelect={setMonth} currency={base} />
+        <div className="chart-nav">
+          <button className="icon-btn" onClick={() => pageChart(-1)} aria-label="Earlier months">
+            <Icon name="left" size={16} />
+          </button>
+          {chartEnd !== current ? (
+            <button className="chip" style={{ padding: '4px 10px', fontSize: 13 }} onClick={backToNow}>
+              Back to now
+            </button>
+          ) : (
+            <span />
+          )}
+          <button
+            className="icon-btn"
+            onClick={() => pageChart(1)}
+            disabled={chartEnd === current}
+            style={{ opacity: chartEnd === current ? 0.3 : 1 }}
+            aria-label="Later months"
+          >
+            <Icon name="right" size={16} />
+          </button>
+        </div>
+        <MonthBars series={series} selected={month} onSelect={setMonthState} currency={base} />
       </div>
 
       <div className="section-title">
