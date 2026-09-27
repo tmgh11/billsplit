@@ -1,0 +1,6 @@
+node_modules
+dist
+public/ocr
+.DS_Store
+.env.local
+_to_delete

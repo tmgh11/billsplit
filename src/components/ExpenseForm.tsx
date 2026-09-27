@@ -1,0 +1,471 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
+import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categories';
+import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
+import { fmt, parseMoney, pctForSplit, round2 } from '../lib/money';
+import { today } from '../lib/dates';
+import { describeFrequency, nextOccurrence, occurrenceId } from '../lib/recurring';
+import { newId, store, useStore } from '../lib/store';
+import type { Expense, Frequency, Person, Recurring, SplitMode } from '../lib/types';
+import { prettyDate } from '../lib/dates';
+
+type Props =
+  | { mode: 'expense'; initial?: Expense; onClose: () => void }
+  | { mode: 'recurring'; initial?: Recurring; onClose: () => void };
+
+const FREQS: { value: Frequency; label: string }[] = [
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'fortnightly', label: '2 weeks' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'yearly', label: 'Yearly' },
+  { value: 'dates', label: 'Set dates' },
+];
+
+export function ExpenseForm(props: Props) {
+  const { settings, device } = useStore();
+  const names = settings.names;
+  const base = settings.baseCurrency;
+  const init = props.initial;
+  const isEdit = Boolean(init);
+  const isRecurring = props.mode === 'recurring';
+
+  const [amountText, setAmountText] = useState(init ? String(init.amount) : '');
+  const [currency, setCurrency] = useState(init?.currency ?? base);
+  const [rate, setRate] = useState<number | null>(init && 'rate' in init ? init.rate : currency === base ? 1 : null);
+  const [rateText, setRateText] = useState('');
+  const [description, setDescription] = useState(init?.description ?? '');
+  const [category, setCategory] = useState(init?.category ?? 'other');
+  const [catTouched, setCatTouched] = useState(isEdit);
+  const [showCats, setShowCats] = useState(false);
+  const [paidBy, setPaidBy] = useState<Person>(init?.paidBy ?? device.me);
+  const [split, setSplit] = useState<SplitMode>(init?.split ?? 'equal');
+  const [tomPct, setTomPct] = useState(init ? pctForSplit(init.split, init.tomPct) : 50);
+  const [date, setDate] = useState(init && 'date' in init ? init.date : today());
+  const [note, setNote] = useState((init && 'note' in init && init.note) || '');
+
+  const recInit = isRecurring ? (init as Recurring | undefined) : undefined;
+  const [repeat, setRepeat] = useState(isRecurring);
+  const [frequency, setFrequency] = useState<Frequency>(recInit?.frequency ?? 'monthly');
+  const [startDate, setStartDate] = useState(recInit?.startDate ?? today());
+  const [endDate, setEndDate] = useState(recInit?.endDate ?? '');
+  const [dates, setDates] = useState<string[]>(recInit?.dates ?? []);
+  const [newDate, setNewDate] = useState('');
+
+  const amount = parseMoney(amountText);
+  const valid = Number.isFinite(amount) && amount > 0 && description.trim().length > 0 && (!repeat || frequency !== 'dates' || dates.length > 0);
+
+  // auto-category from the description until the user picks one
+  useEffect(() => {
+    if (catTouched) return;
+    const g = guessCategory(description, settings.categoryRules);
+    setCategory(g ?? 'other');
+  }, [description, catTouched, settings.categoryRules]);
+
+  // exchange rate when currency changes
+  useEffect(() => {
+    if (currency === base) {
+      setRate(1);
+      return;
+    }
+    if (init && 'rate' in init && init.currency === currency) return;
+    let live = true;
+    setRate(null);
+    rateToBase(currency, base).then((r) => live && setRate(r));
+    return () => {
+      live = false;
+    };
+  }, [currency, base, init]);
+
+  useEffect(() => {
+    if (rate) setRateText(String(round2(rate * 10000) / 10000));
+  }, [rate]);
+
+  const effPct = pctForSplit(split, tomPct);
+  const baseTotal = Number.isFinite(amount) && rate ? amount * rate : 0;
+  const tomShare = (baseTotal * effPct) / 100;
+  const nuriaShare = baseTotal - tomShare;
+  const owed = paidBy === 'tom' ? nuriaShare : tomShare;
+  const debtor: Person = paidBy === 'tom' ? 'nuria' : 'tom';
+
+  const explanation =
+    !baseTotal ? null : owed < 0.005 ? (
+      <>
+        {names[paidBy]} paid for their own thing — <strong>no one owes anything</strong>. It still counts in analytics.
+      </>
+    ) : (
+      <>
+        <strong className={debtor}>{names[debtor]}</strong> owes <strong className={paidBy}>{names[paidBy]}</strong>{' '}
+        <strong>{fmt(owed, base)}</strong>
+      </>
+    );
+
+  const splitOptions = useMemo(
+    () => [
+      { value: 'equal' as const, label: '50/50', sub: 'Shared' },
+      { value: 'tom' as const, label: names.tom, sub: 'All theirs', className: 'tom' },
+      { value: 'nuria' as const, label: names.nuria, sub: 'All theirs', className: 'nuria' },
+      { value: 'custom' as const, label: 'Custom', sub: 'Set %' },
+    ],
+    [names],
+  );
+
+  const onSave = () => {
+    if (!valid) return;
+    const r = rate ?? parseMoney(rateText);
+    if (!isRecurring && (!r || !Number.isFinite(r))) {
+      toast('Enter an exchange rate first');
+      return;
+    }
+    // learn the category the user chose for this description
+    const guessed = guessCategory(description);
+    if (catTouched && category !== guessed) {
+      store.updateSettings({ categoryRules: { ...settings.categoryRules, ...learnRule(description, category) } });
+    }
+    const common = {
+      description: description.trim(),
+      category,
+      amount: round2(amount),
+      currency,
+      paidBy,
+      split,
+      tomPct: effPct,
+    };
+    if (isRecurring || (repeat && !isEdit)) {
+      const recId = recInit?.id ?? newId();
+      const anchor = isRecurring ? startDate : date;
+      const rec: Recurring = {
+        ...(recInit ?? {}),
+        ...common,
+        id: recId,
+        kind: 'recurring',
+        frequency,
+        startDate: frequency === 'dates' ? [...dates].sort()[0] ?? anchor : anchor,
+        dates: frequency === 'dates' ? [...dates].sort() : undefined,
+        endDate: endDate || undefined,
+        updatedAt: 0,
+      };
+      if (!isRecurring) {
+        // Adding a new expense that also repeats: log today's one now, schedule the rest.
+        rec.generatedUntil = date;
+        store.put(rec, {
+          ...common, id: occurrenceId(recId, date), kind: 'expense', date, rate: r!, recurringId: recId,
+          note: note || undefined, createdBy: device.me, updatedAt: 0,
+        });
+        toast('Added, and set to repeat');
+      } else {
+        store.put(rec);
+        void store.generateRecurring();
+        const next = nextOccurrence(rec, today());
+        toast(next ? `Saved · next on ${prettyDate(next)}` : 'Saved');
+      }
+    } else {
+      const e: Expense = {
+        ...(init as Expense | undefined),
+        ...common,
+        id: init?.id ?? newId(),
+        kind: 'expense',
+        date,
+        rate: r!,
+        note: note.trim() || undefined,
+        createdBy: (init as Expense | undefined)?.createdBy ?? device.me,
+        updatedAt: 0,
+      };
+      store.put(e);
+      toast(isEdit ? 'Saved' : 'Expense added');
+    }
+    haptic();
+    props.onClose();
+  };
+
+  const onDelete = () => {
+    if (!init) return;
+    const snapshot = store.get(init.id);
+    store.remove(init.id);
+    toast(isRecurring ? 'Repeating expense deleted' : 'Expense deleted', {
+      label: 'Undo',
+      run: () => snapshot && store.put({ ...snapshot, deleted: false }),
+    });
+    props.onClose();
+  };
+
+  const cat = categoryById(category);
+  const title = isRecurring ? (isEdit ? 'Edit repeating expense' : 'New repeating expense') : isEdit ? 'Edit expense' : 'Add expense';
+
+  return (
+    <Sheet
+      title={title}
+      onClose={props.onClose}
+      full
+      footer={
+        <div className="btn-row">
+          {isEdit && (
+            <button className="btn danger" style={{ width: 'auto' }} onClick={onDelete} aria-label="Delete">
+              <Icon name="trash" size={20} />
+            </button>
+          )}
+          <button className="btn primary" disabled={!valid} onClick={onSave}>
+            {isEdit ? 'Save changes' : isRecurring || repeat ? 'Save & schedule' : 'Add expense'}
+          </button>
+        </div>
+      }
+    >
+      <div className="amount-entry">
+        <input
+          inputMode="decimal"
+          placeholder="0.00"
+          value={amountText}
+          onChange={(e) => setAmountText(e.target.value)}
+          aria-label="Amount"
+          className="num"
+          autoFocus={!isEdit}
+        />
+        <select className="cur-select" value={currency} onChange={(e) => setCurrency(e.target.value)} aria-label="Currency">
+          {CURRENCIES.map((c) => (
+            <option key={c} value={c}>
+              {CURRENCY_FLAGS[c] ?? ''} {c}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {currency !== base && (
+        <div className="field">
+          <div className="note" style={{ justifyContent: 'space-between' }}>
+            <span>
+              1 {currency} ={' '}
+              <input
+                className="num"
+                inputMode="decimal"
+                value={rateText}
+                onChange={(e) => {
+                  setRateText(e.target.value);
+                  const v = parseMoney(e.target.value);
+                  if (v > 0) setRate(v);
+                }}
+                placeholder={rate === null ? 'loading…' : ''}
+                style={{ width: 80, border: 0, background: 'transparent', fontWeight: 700, outline: 'none' }}
+                aria-label="Exchange rate"
+              />{' '}
+              {base}
+            </span>
+            {baseTotal > 0 && <strong className="num">≈ {fmt(baseTotal, base)}</strong>}
+          </div>
+        </div>
+      )}
+
+      <div className="field">
+        <label htmlFor="desc">What was it?</label>
+        <input
+          id="desc"
+          className="input"
+          placeholder="e.g. Tesco, Council tax, Flights"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          autoComplete="off"
+          enterKeyHint="done"
+        />
+      </div>
+
+      <div className="field">
+        <div className="field-label">Category</div>
+        <button type="button" className="chip" onClick={() => setShowCats((s) => !s)} aria-expanded={showCats}>
+          <span>{cat.emoji}</span> {cat.label}
+          <span className="muted" style={{ fontWeight: 500 }}>
+            {catTouched ? '' : '· auto'}
+          </span>
+          <Icon name={showCats ? 'left' : 'right'} size={14} />
+        </button>
+        {showCats && (
+          <div className="cat-grid" style={{ marginTop: 10 }}>
+            {CATEGORIES.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className={c.id === category ? 'on' : ''}
+                onClick={() => {
+                  setCategory(c.id);
+                  setCatTouched(true);
+                  setShowCats(false);
+                }}
+              >
+                <span>{c.emoji}</span>
+                <span>{c.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="field">
+        <div className="field-label">Paid by</div>
+        <Seg
+          value={paidBy}
+          onChange={setPaidBy}
+          options={[
+            { value: 'tom', label: names.tom, className: 'tom' },
+            { value: 'nuria', label: names.nuria, className: 'nuria' },
+          ]}
+        />
+      </div>
+
+      <div className="field">
+        <div className="field-label">Whose cost is it?</div>
+        <Seg tall value={split} onChange={setSplit} options={splitOptions} />
+        {split === 'custom' && (
+          <div className="card pad" style={{ marginTop: 10, padding: 14 }}>
+            <div className="inline" style={{ alignItems: 'center', marginBottom: 6 }}>
+              <label className="tom" style={{ fontWeight: 650, fontSize: 14 }}>
+                {names.tom}{' '}
+                <input
+                  className="input num"
+                  inputMode="decimal"
+                  value={String(round2(tomPct))}
+                  onChange={(e) => setTomPct(Math.min(100, Math.max(0, parseMoney(e.target.value) || 0)))}
+                  style={{ width: 70, minHeight: 38, padding: '6px 8px', display: 'inline-block' }}
+                  aria-label={`${names.tom} percent`}
+                />{' '}
+                %
+              </label>
+              <label className="nuria" style={{ fontWeight: 650, fontSize: 14, textAlign: 'right' }}>
+                <input
+                  className="input num"
+                  inputMode="decimal"
+                  value={String(round2(100 - tomPct))}
+                  onChange={(e) => setTomPct(100 - Math.min(100, Math.max(0, parseMoney(e.target.value) || 0)))}
+                  style={{ width: 70, minHeight: 38, padding: '6px 8px', display: 'inline-block' }}
+                  aria-label={`${names.nuria} percent`}
+                />{' '}
+                % {names.nuria}
+              </label>
+            </div>
+            <input
+              type="range"
+              className="slider"
+              min={0}
+              max={100}
+              step={5}
+              value={tomPct}
+              onChange={(e) => setTomPct(Number(e.target.value))}
+              aria-label="Split percentage"
+            />
+            {baseTotal > 0 && (
+              <div className="inline text-2 num" style={{ fontSize: 13 }}>
+                <span>{fmt(tomShare, base)}</span>
+                <span style={{ textAlign: 'right' }}>{fmt(nuriaShare, base)}</span>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {explanation && (
+        <div className={`note ${owed < 0.005 ? '' : debtor}`} style={{ marginBottom: 16 }}>
+          <span>{explanation}</span>
+        </div>
+      )}
+
+      {!isRecurring && (
+        <div className="field">
+          <label htmlFor="date">Date</label>
+          <input id="date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+        </div>
+      )}
+
+      {!isRecurring && !isEdit && (
+        <div className="card" style={{ padding: '10px 14px', marginBottom: 16 }}>
+          <div className="toggle-row">
+            <div>
+              <div style={{ fontWeight: 600 }}>Repeat this expense</div>
+              <div className="muted" style={{ fontSize: 13 }}>Adds it automatically on a schedule</div>
+            </div>
+            <Toggle checked={repeat} onChange={setRepeat} label="Repeat" />
+          </div>
+        </div>
+      )}
+
+      {repeat && (
+        <div className="field">
+          <div className="field-label">How often?</div>
+          <div className="filters" style={{ margin: '0 0 12px', padding: 0, flexWrap: 'wrap' }}>
+            {FREQS.map((f) => (
+              <button key={f.value} type="button" className={`chip ${frequency === f.value ? 'on' : ''}`} onClick={() => setFrequency(f.value)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {frequency === 'dates' ? (
+            <div>
+              <div className="inline">
+                <input type="date" className="input" value={newDate} onChange={(e) => setNewDate(e.target.value)} aria-label="Add a date" />
+                <button
+                  type="button"
+                  className="btn small"
+                  style={{ flex: 'none', minHeight: 50 }}
+                  disabled={!newDate}
+                  onClick={() => {
+                    setDates((d) => [...new Set([...d, newDate])].sort());
+                    setNewDate('');
+                  }}
+                >
+                  Add date
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                {dates.map((d) => (
+                  <button key={d} type="button" className="chip" onClick={() => setDates((x) => x.filter((y) => y !== d))}>
+                    {prettyDate(d)} <Icon name="close" size={14} />
+                  </button>
+                ))}
+                {!dates.length && <span className="muted" style={{ fontSize: 13 }}>Add each date it’s due (e.g. council tax instalments).</span>}
+              </div>
+            </div>
+          ) : (
+            <div className="inline">
+              {isRecurring && (
+                <div>
+                  <label className="field-label" htmlFor="start">
+                    First / next date
+                  </label>
+                  <input id="start" type="date" className="input" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                </div>
+              )}
+              <div>
+                <label className="field-label" htmlFor="end">
+                  Ends (optional)
+                </label>
+                <input id="end" type="date" className="input" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </div>
+            </div>
+          )}
+          {frequency !== 'dates' && (
+            <p className="small-print">
+              {describeFrequency({ frequency, startDate: isRecurring ? startDate : date } as Recurring)}, starting{' '}
+              {prettyDate(isRecurring ? startDate : date).toLowerCase()}.
+            </p>
+          )}
+        </div>
+      )}
+
+      {!isRecurring && (
+        <div className="field">
+          <label htmlFor="note">Note (optional)</label>
+          <input id="note" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />
+        </div>
+      )}
+
+      {init && 'items' in init && init.items?.length ? (
+        <details className="card" style={{ padding: '12px 14px' }}>
+          <summary style={{ fontWeight: 600 }}>{init.items.length} receipt items</summary>
+          {init.items.map((i) => (
+            <div key={i.id} className="inline" style={{ fontSize: 14, padding: '6px 0' }}>
+              <span>{i.name}</span>
+              <span className={`num ${i.owner === 'shared' ? 'text-2' : i.owner}`} style={{ textAlign: 'right' }}>
+                {i.owner === 'shared' ? 'Shared' : names[i.owner]} · {fmt(i.price, init.currency)}
+              </span>
+            </div>
+          ))}
+        </details>
+      ) : null}
+    </Sheet>
+  );
+}
