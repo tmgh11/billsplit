@@ -13,6 +13,16 @@ export function fromISO(s: string): Date {
 
 export const today = () => toISO(new Date());
 
+/**
+ * A Postgres timestamp (e.g. "2026-09-27T20:01:02.123456+00:00") moved back by `ms`, as an ISO
+ * string. Fractional seconds are cut to milliseconds first, since Safari won't parse more digits.
+ * Returns null if the timestamp can't be read.
+ */
+export function rewindTimestamp(ts: string, ms: number): string | null {
+  const t = Date.parse(ts.replace(/\.(\d+)/, (_, f: string) => `.${f.padEnd(3, '0').slice(0, 3)}`));
+  return Number.isFinite(t) ? new Date(t - ms).toISOString() : null;
+}
+
 export function addDays(s: string, n: number): string {
   const d = fromISO(s);
   d.setDate(d.getDate() + n);

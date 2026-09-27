@@ -4,6 +4,8 @@ import { occurrences, dueExpenses } from './recurring';
 import { guessCategory, learnRule } from './categories';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise } from './splitwise';
+import { rewindTimestamp } from './dates';
+import { mergeLegacy } from './persist';
 import type { Expense, Recurring, Settlement } from './types';
 
 const exp = (p: Partial<Expense>): Expense => ({
@@ -317,5 +319,29 @@ describe('splitwise import – real-world file quirks', () => {
 describe('splitwise placeholder file', () => {
   it('recognises the "we will email you" placeholder', () => {
     expect(() => parseSplitwise("We'll send you an email with your expense spreadsheet as soon as it's ready.")).toThrow(/email/);
+  });
+});
+
+describe('sync cursor', () => {
+  it('rewinds Postgres timestamps, whatever their fractional digits', () => {
+    expect(rewindTimestamp('2026-09-27T20:01:02.123456+00:00', 60_000)).toBe('2026-09-27T20:00:02.123Z');
+    expect(rewindTimestamp('2026-09-27T20:01:02.1+00:00', 1000)).toBe('2026-09-27T20:01:01.100Z');
+    expect(rewindTimestamp('2026-09-27T20:01:02+00:00', 0)).toBe('2026-09-27T20:01:02.000Z');
+    expect(rewindTimestamp('not a time', 0)).toBeNull();
+  });
+});
+
+describe('storage fallback', () => {
+  it('keeps the newer copy of each entry, unions the unsynced ids and drops the cursor', () => {
+    const a1 = exp({ id: 'a', amount: 10, updatedAt: 1 });
+    const a2 = exp({ id: 'a', amount: 20, updatedAt: 2 });
+    const b1 = exp({ id: 'b', updatedAt: 5 });
+    const b0 = exp({ id: 'b', updatedAt: 4 });
+    const c = exp({ id: 'c', updatedAt: 1 });
+    const m = mergeLegacy([a1, b1], ['a'], { entries: [a2, b0, c], dirty: ['c'] });
+    expect(Object.fromEntries(m.entries.map((e) => [e.id, e.updatedAt]))).toEqual({ a: 2, b: 5, c: 1 });
+    expect(m.newer.map((e) => e.id)).toEqual(['a', 'c']);
+    expect(m.dirty.sort()).toEqual(['a', 'c']);
+    expect(m.cursor).toBeNull();
   });
 });

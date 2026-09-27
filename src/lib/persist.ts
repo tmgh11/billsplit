@@ -7,16 +7,27 @@
  */
 import type { Entry } from './types';
 
+export interface Loaded {
+  entries: Entry[];
+  dirty: string[];
+  /** how far the phone has pulled from Supabase; null = pull everything next time */
+  cursor: string | null;
+}
+
 export interface Persistence {
   readonly kind: 'indexeddb' | 'localstorage';
-  loadAll(): Promise<{ entries: Entry[]; dirty: string[] }>;
-  /** Upsert `changed` entries and replace the list of not-yet-synced ids. */
-  write(changed: Entry[], dirty: string[], all: () => Iterable<Entry>): Promise<void>;
+  loadAll(): Promise<Loaded>;
+  /**
+   * Upsert `changed` entries and replace the not-yet-synced ids and the pull cursor, all in one
+   * go, so the saved cursor never claims rows that aren't saved.
+   */
+  write(changed: Entry[], dirty: string[], cursor: string | null, all: () => Iterable<Entry>): Promise<void>;
 }
 
 // Keys used by earlier versions (everything in localStorage).
 const LEGACY_ENTRIES = 'billsplit.entries';
 const LEGACY_DIRTY = 'billsplit.dirty';
+const LOCAL_CURSOR = 'billsplit.cursor';
 
 function readLegacy(): { entries: Entry[]; dirty: string[] } | null {
   try {
@@ -28,6 +39,23 @@ function readLegacy(): { entries: Entry[]; dirty: string[] } | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Combine what IndexedDB holds with a copy left in localStorage, keeping the newer version of each
+ * entry. The localStorage copy is either from before IndexedDB was used, or from a session where
+ * IndexedDB failed to open and the app fell back. Either way it may hold rows IndexedDB never saw,
+ * so the pull cursor is dropped and the next sync pulls everything.
+ */
+export function mergeLegacy(
+  stored: Entry[],
+  storedDirty: string[],
+  legacy: { entries: Entry[]; dirty: string[] },
+): Loaded & { newer: Entry[] } {
+  const byId = new Map(stored.map((e) => [e.id, e]));
+  const newer = legacy.entries.filter((e) => (byId.get(e.id)?.updatedAt ?? -Infinity) < e.updatedAt);
+  for (const e of newer) byId.set(e.id, e);
+  return { entries: [...byId.values()], dirty: [...new Set([...storedDirty, ...legacy.dirty])], cursor: null, newer };
 }
 
 // ---------- IndexedDB ----------
@@ -68,32 +96,35 @@ class IdbPersistence implements Persistence {
   readonly kind = 'indexeddb' as const;
   constructor(private db: IDBDatabase) {}
 
-  async loadAll() {
+  async loadAll(): Promise<Loaded> {
     const tx = this.db.transaction([ENTRIES, META], 'readonly');
-    const [entries, dirty] = await Promise.all([
+    const [entries, dirty, cursor] = await Promise.all([
       req(tx.objectStore(ENTRIES).getAll() as IDBRequest<Entry[]>),
       req(tx.objectStore(META).get('dirty') as IDBRequest<string[] | undefined>),
+      req(tx.objectStore(META).get('cursor') as IDBRequest<string | null | undefined>),
     ]);
-    if (entries.length) return { entries, dirty: dirty ?? [] };
-
-    // First run of this version: move data over from localStorage, then free that space.
     const legacy = readLegacy();
-    if (!legacy) return { entries: [], dirty: [] };
-    await this.write(legacy.entries, legacy.dirty);
+    if (!legacy) return { entries, dirty: dirty ?? [], cursor: cursor ?? null };
+
+    // Fold the localStorage copy in, then free that space.
+    const merged = mergeLegacy(entries, dirty ?? [], legacy);
+    await this.write(merged.newer, merged.dirty, null);
     try {
       localStorage.removeItem(LEGACY_ENTRIES);
       localStorage.removeItem(LEGACY_DIRTY);
+      localStorage.removeItem(LOCAL_CURSOR);
     } catch {
       /* ignore */
     }
-    return legacy;
+    return { entries: merged.entries, dirty: merged.dirty, cursor: null };
   }
 
-  async write(changed: Entry[], dirty: string[]) {
+  async write(changed: Entry[], dirty: string[], cursor: string | null) {
     const tx = this.db.transaction([ENTRIES, META], 'readwrite');
     const store = tx.objectStore(ENTRIES);
     for (const e of changed) store.put(e);
     tx.objectStore(META).put(dirty, 'dirty');
+    tx.objectStore(META).put(cursor, 'cursor');
     await done(tx);
   }
 }
@@ -102,14 +133,17 @@ class IdbPersistence implements Persistence {
 
 class LocalPersistence implements Persistence {
   readonly kind = 'localstorage' as const;
-  async loadAll() {
-    return readLegacy() ?? { entries: [], dirty: [] };
+  async loadAll(): Promise<Loaded> {
+    const legacy = readLegacy();
+    return legacy ? { ...legacy, cursor: localStorage.getItem(LOCAL_CURSOR) } : { entries: [], dirty: [], cursor: null };
   }
-  async write(_changed: Entry[], dirty: string[], all: () => Iterable<Entry>) {
+  async write(_changed: Entry[], dirty: string[], cursor: string | null, all: () => Iterable<Entry>) {
     const map: Record<string, Entry> = {};
     for (const e of all()) map[e.id] = e;
     localStorage.setItem(LEGACY_ENTRIES, JSON.stringify(map));
     localStorage.setItem(LEGACY_DIRTY, JSON.stringify(dirty));
+    if (cursor) localStorage.setItem(LOCAL_CURSOR, cursor);
+    else localStorage.removeItem(LOCAL_CURSOR);
   }
 }
 

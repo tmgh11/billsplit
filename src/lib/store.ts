@@ -64,6 +64,8 @@ class Store {
   /** ids changed in memory but not yet written to the phone's storage */
   private unsaved = new Set<string>();
   private writing: Promise<void> = Promise.resolve();
+  /** how far this phone has pulled from Supabase (saved alongside the entries it covers) */
+  private cursor: string | null = null;
   /** resolves once the ledger has been loaded from storage */
   readonly ready: Promise<void>;
   private device: DeviceSettings = load<DeviceSettings>(K.device, { me: 'tom' });
@@ -81,11 +83,13 @@ class Store {
   private async init() {
     try {
       this.persistence = await openPersistence();
-      const { entries, dirty } = await this.persistence.loadAll();
+      const { entries, dirty, cursor } = await this.persistence.loadAll();
       // anything created before loading finished (unlikely) wins over what was stored
       for (const e of entries) if (!this.entries.has(e.id)) this.entries.set(e.id, e);
       for (const id of dirty) this.dirty.add(id);
+      this.cursor = cursor;
     } catch (e) {
+      // cursor stays null, so the next sync pulls the whole ledger rather than just what's new
       console.error('Could not load saved data', e);
     }
     this.loaded = true;
@@ -128,28 +132,44 @@ class Store {
     this.snap = null;
     if (ids) {
       for (const id of ids) this.unsaved.add(id);
-      clearTimeout(this.persistTimer);
-      this.persistTimer = window.setTimeout(() => void this.flush(), 30);
+      this.schedulePersist();
     }
     this.listeners.forEach((l) => l());
+  }
+
+  private schedulePersist() {
+    clearTimeout(this.persistTimer);
+    this.persistTimer = window.setTimeout(() => void this.flush(), 30);
   }
 
   /** Write pending changes to the phone's storage (serialised so writes never overlap). */
   flush(): Promise<void> {
     clearTimeout(this.persistTimer);
     if (!this.persistence || !this.loaded) return this.writing;
-    const ids = [...this.unsaved];
-    this.unsaved.clear();
-    const changed = ids.map((id) => this.entries.get(id)).filter(Boolean) as Entry[];
-    const dirty = [...this.dirty];
     const p = this.persistence;
-    this.writing = this.writing
-      .then(() => p.write(changed, dirty, () => this.entries.values()))
-      .catch((e) => {
+    // Decide what to write only once earlier writes have finished, so entries from a failed write
+    // are retried in the same transaction as any pull cursor that covers them.
+    this.writing = this.writing.then(async () => {
+      const ids = [...this.unsaved];
+      this.unsaved.clear();
+      const changed = ids.map((id) => this.entries.get(id)).filter(Boolean) as Entry[];
+      try {
+        await p.write(changed, [...this.dirty], this.cursor, () => this.entries.values());
+      } catch (e) {
         console.error('Could not save to the phone', e);
         ids.forEach((id) => this.unsaved.add(id)); // retry on the next change
-      });
+      }
+    });
     return this.writing;
+  }
+
+  getPullCursor() {
+    return this.cursor;
+  }
+  /** Call after `merge`-ing the rows the cursor covers; both are saved together. */
+  setPullCursor(cursor: string | null) {
+    this.cursor = cursor;
+    this.schedulePersist();
   }
 
   get(id: string) {
@@ -204,6 +224,12 @@ class Store {
 
   dirtyEntries(): Entry[] {
     return [...this.dirty].map((id) => this.entries.get(id)).filter(Boolean) as Entry[];
+  }
+  /** Queue entries to be pushed again on this sync (e.g. the server turned out not to have them). */
+  markDirty(ids: string[]) {
+    if (!ids.length) return;
+    for (const id of ids) if (this.entries.has(id)) this.dirty.add(id);
+    this.changed([]);
   }
   markClean(ids: string[], pushed: Map<string, number>) {
     for (const id of ids) {

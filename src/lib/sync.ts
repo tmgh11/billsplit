@@ -4,11 +4,20 @@
  */
 import { createClient, type RealtimeChannel, type SupabaseClient } from '@supabase/supabase-js';
 import { store } from './store';
+import { rewindTimestamp } from './dates';
 import type { Entry } from './types';
 
-const LAST_PULL = 'billsplit.lastPull';
+const EPOCH = '1970-01-01T00:00:00Z';
+/**
+ * Each pull re-reads this much before the cursor. `updated_at` is stamped when a row is written,
+ * not when it's committed, so rows can appear slightly out of order; merging one twice is harmless.
+ */
+const PULL_OVERLAP_MS = 60_000;
+/** How often to compare every row's version with the server, to catch anything a pull missed. */
+const RECONCILE_EVERY_MS = 60 * 60 * 1000;
 
 let client: SupabaseClient | null = null;
+let lastReconcile = 0;
 let clientKey = '';
 let channel: RealtimeChannel | null = null;
 let syncing: Promise<void> | null = null;
@@ -50,6 +59,9 @@ interface Row {
   updated_at: string;
 }
 
+const ROW_COLUMNS = 'id,kind,data,deleted,client_updated_at,updated_at';
+const toEntry = (r: Row) => ({ ...r.data, updatedAt: r.client_updated_at, deleted: r.deleted }) as Entry;
+
 async function push(sb: SupabaseClient) {
   const dirty = store.dirtyEntries();
   for (let i = 0; i < dirty.length; i += 200) {
@@ -71,23 +83,55 @@ async function push(sb: SupabaseClient) {
 }
 
 async function pull(sb: SupabaseClient) {
-  let since = localStorage.getItem(LAST_PULL) ?? '1970-01-01T00:00:00Z';
+  const saved = store.getPullCursor();
+  let since = (saved && rewindTimestamp(saved, PULL_OVERLAP_MS)) ?? EPOCH;
   for (;;) {
     const { data, error } = await sb
       .from('entries')
-      .select('id,kind,data,deleted,client_updated_at,updated_at')
+      .select(ROW_COLUMNS)
       .gt('updated_at', since)
       .order('updated_at', { ascending: true })
       .limit(1000);
     if (error) throw error;
     const rows = (data ?? []) as Row[];
     if (rows.length) {
-      store.merge(rows.map((r) => ({ ...r.data, updatedAt: r.client_updated_at, deleted: r.deleted }) as Entry));
+      store.merge(rows.map(toEntry));
+      // Never moves backwards: the row the saved cursor came from is always re-read by the overlap.
       since = rows[rows.length - 1].updated_at;
-      localStorage.setItem(LAST_PULL, since);
+      store.setPullCursor(since);
     }
     if (rows.length < 1000) break;
   }
+}
+
+/**
+ * Compare every row's version (ids and timestamps only, so it's cheap) with this phone's copy.
+ * Fetches anything missing or newer on the server, and re-queues anything the server is missing,
+ * so a row skipped by an earlier pull can't stay missing.
+ */
+async function reconcile(sb: SupabaseClient) {
+  const server = new Map<string, number>();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb
+      .from('entries')
+      .select('id,client_updated_at')
+      .order('id')
+      .range(from, from + 999);
+    if (error) throw error;
+    const rows = (data ?? []) as Pick<Row, 'id' | 'client_updated_at'>[];
+    for (const r of rows) server.set(r.id, r.client_updated_at);
+    if (rows.length < 1000) break;
+  }
+
+  const behind = [...server].filter(([id, v]) => (store.get(id)?.updatedAt ?? -Infinity) < v).map(([id]) => id);
+  for (let i = 0; i < behind.length; i += 100) {
+    const { data, error } = await sb.from('entries').select(ROW_COLUMNS).in('id', behind.slice(i, i + 100));
+    if (error) throw error;
+    store.merge(((data ?? []) as Row[]).map(toEntry));
+  }
+
+  store.markDirty(store.all().filter((e) => (server.get(e.id) ?? -Infinity) < e.updatedAt).map((e) => e.id));
+  if (behind.length) console.info(`Sync check: fetched ${behind.length} entries a previous sync missed`);
 }
 
 async function runSync() {
@@ -113,6 +157,10 @@ async function runSync() {
   store.setSync({ state: 'syncing', email: session.user.email });
   try {
     await pull(sb);
+    if (Date.now() - lastReconcile > RECONCILE_EVERY_MS) {
+      await reconcile(sb);
+      lastReconcile = Date.now();
+    }
     await store.generateRecurring();
     await push(sb);
     store.setSync({ state: 'synced', lastSynced: Date.now(), message: undefined });
@@ -143,11 +191,10 @@ function ensureRealtime(sb: SupabaseClient) {
   channel = sb
     .channel('entries-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'entries' }, (payload) => {
+      // Only applies the row. The pull cursor is left alone: one event says nothing about rows
+      // written while the connection was down.
       const r = payload.new as Row | undefined;
-      if (r?.data) {
-        store.merge([{ ...r.data, updatedAt: r.client_updated_at, deleted: r.deleted } as Entry]);
-        if (r.updated_at > (localStorage.getItem(LAST_PULL) ?? '')) localStorage.setItem(LAST_PULL, r.updated_at);
-      }
+      if (r?.data) store.merge([toEntry(r)]);
     })
     .subscribe();
 }
@@ -157,7 +204,8 @@ export async function signIn(email: string, password: string) {
   if (!sb) throw new Error('Add your Supabase URL and key first');
   const { error } = await sb.auth.signInWithPassword({ email: email.trim(), password });
   if (error) throw error;
-  localStorage.removeItem(LAST_PULL); // pull everything on first sign-in
+  store.setPullCursor(null); // pull everything on first sign-in
+  lastReconcile = 0;
   await syncNow();
 }
 
@@ -173,10 +221,17 @@ export function resetClient() {
   if (channel && client) void client.removeChannel(channel);
   channel = null;
   client = null;
-  localStorage.removeItem(LAST_PULL);
+  store.setPullCursor(null);
+  lastReconcile = 0;
 }
 
 export function startSync() {
+  // Older versions kept the cursor here, apart from the ledger it described.
+  try {
+    localStorage.removeItem('billsplit.lastPull');
+  } catch {
+    /* ignore */
+  }
   store.onDirty = () => {
     clearTimeout(debounce);
     debounce = window.setTimeout(() => void syncNow(), 700);
