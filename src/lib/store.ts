@@ -35,6 +35,8 @@ export interface Snapshot {
   sync: { state: SyncState; message?: string; lastSynced?: number; email?: string };
 }
 
+type Ledger = Pick<Snapshot, 'expenses' | 'settlements' | 'recurring' | 'settings'>;
+
 function load<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key);
@@ -72,6 +74,7 @@ class Store {
   private syncInfo: Snapshot['sync'] = { state: 'local' };
   private listeners = new Set<Listener>();
   private snap: Snapshot | null = null;
+  private ledger: Ledger | null = null;
   private persistTimer: number | undefined;
   /** set by the sync module */
   onDirty: (() => void) | null = null;
@@ -107,6 +110,13 @@ class Store {
 
   getSnapshot = (): Snapshot => {
     if (this.snap) return this.snap;
+    this.ledger ??= this.buildLedger();
+    this.snap = { ...this.ledger, loaded: this.loaded, device: this.device, sync: this.syncInfo };
+    return this.snap;
+  };
+
+  /** The sorted lists. Only rebuilt when entries change, not on every sync-status update. */
+  private buildLedger(): Ledger {
     const expenses: Expense[] = [];
     const settlements: Settlement[] = [];
     const recurring: Recurring[] = [];
@@ -123,17 +133,20 @@ class Store {
     expenses.sort(byDate);
     settlements.sort(byDate);
     recurring.sort((a, b) => a.description.localeCompare(b.description));
-    this.snap = { loaded: this.loaded, expenses, settlements, recurring, settings, device: this.device, sync: this.syncInfo };
-    return this.snap;
-  };
+    return { expenses, settlements, recurring, settings };
+  }
 
-  /** Notify the UI; `ids` (if given) are entries to write to the phone's storage. */
-  private changed(ids: Iterable<string> | null = null) {
+  /** Entries changed: rebuild the lists, write `ids` to the phone's storage, and update the UI. */
+  private changed(ids: Iterable<string>) {
+    this.ledger = null;
+    for (const id of ids) this.unsaved.add(id);
+    this.schedulePersist();
+    this.notify();
+  }
+
+  /** Something other than the entries changed (sync status, device settings): lists are reused. */
+  private notify() {
     this.snap = null;
-    if (ids) {
-      for (const id of ids) this.unsaved.add(id);
-      this.schedulePersist();
-    }
     this.listeners.forEach((l) => l());
   }
 
@@ -232,20 +245,20 @@ class Store {
   markDirty(ids: string[]) {
     if (!ids.length) return;
     for (const id of ids) if (this.entries.has(id)) this.dirty.add(id);
-    this.changed([]);
+    this.schedulePersist(); // saves the longer dirty list; nothing on screen changes
   }
   markClean(ids: string[], pushed: Map<string, number>) {
     for (const id of ids) {
       // only clear if not edited again while the push was in flight
       if (this.entries.get(id)?.updatedAt === pushed.get(id)) this.dirty.delete(id);
     }
-    this.changed([]); // persists the shorter dirty list
+    this.schedulePersist(); // saves the shorter dirty list; nothing on screen changes
   }
 
   setDevice(patch: Partial<DeviceSettings>) {
     this.device = { ...this.device, ...patch };
     save(K.device, this.device);
-    this.changed();
+    this.notify();
   }
   getDevice() {
     return this.device;
@@ -253,7 +266,7 @@ class Store {
 
   setSync(info: Partial<Snapshot['sync']>) {
     this.syncInfo = { ...this.syncInfo, ...info };
-    this.changed();
+    this.notify();
   }
 
   /** Replace everything (used by "import backup"). */

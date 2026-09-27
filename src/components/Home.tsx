@@ -16,7 +16,7 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
   const [cat, setCat] = useState<string | null>(null);
   const [limit, setLimit] = useState(80);
 
-  const bal = balance(expenses, settlements);
+  const bal = useMemo(() => balance(expenses, settlements), [expenses, settlements]);
   const owing = describeBalance(bal);
 
   const rows = useMemo(() => {

@@ -25,8 +25,7 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put('./index.html', copy));
+          if (res.ok) event.waitUntil(updateShell(res.clone()));
           return res;
         })
         .catch(() => caches.match('./index.html')),
@@ -48,3 +47,24 @@ self.addEventListener('fetch', (event) => {
     ),
   );
 });
+
+/**
+ * Keep the latest page for offline use. When it has changed (a new deploy), drop cached build files
+ * it no longer uses: every build gets new hashed names under assets/, so old ones would otherwise
+ * pile up on the phone forever. Icons and the OCR files keep their names and are left alone.
+ * The current build's lazily loaded files (e.g. receipt scanning) are cached again on next use.
+ */
+async function updateShell(res) {
+  const cache = await caches.open(CACHE);
+  const html = await res.text();
+  const previous = await cache.match('./index.html');
+  await cache.put('./index.html', new Response(html, { headers: res.headers }));
+  if (!previous || (await previous.text()) === html) return;
+
+  const used = new Set(
+    [...html.matchAll(/(?:src|href)="(?:\.\/)?(assets\/[^"]+)"/g)].map((m) => new URL(m[1], self.registration.scope).href),
+  );
+  for (const key of await cache.keys()) {
+    if (new URL(key.url).pathname.includes('/assets/') && !used.has(key.url)) await cache.delete(key);
+  }
+}

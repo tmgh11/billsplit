@@ -395,26 +395,10 @@ export function ExpenseForm(props: Props) {
           <div className="card pad" style={{ marginTop: 10, padding: 14 }}>
             <div className="inline" style={{ alignItems: 'center', marginBottom: 6 }}>
               <label className="tom" style={{ fontWeight: 650, fontSize: 14 }}>
-                {names.tom}{' '}
-                <input
-                  className="input num"
-                  inputMode="decimal"
-                  value={String(round2(tomPct))}
-                  onChange={(e) => setTomPct(Math.min(100, Math.max(0, parseMoney(e.target.value) || 0)))}
-                  style={{ width: 70, minHeight: 38, padding: '6px 8px', display: 'inline-block' }}
-                  aria-label={`${names.tom} percent`}
-                />{' '}
-                %
+                {names.tom} <PctInput value={tomPct} onChange={setTomPct} label={`${names.tom} percent`} /> %
               </label>
               <label className="nuria" style={{ fontWeight: 650, fontSize: 14, textAlign: 'right' }}>
-                <input
-                  className="input num"
-                  inputMode="decimal"
-                  value={String(round2(100 - tomPct))}
-                  onChange={(e) => setTomPct(100 - Math.min(100, Math.max(0, parseMoney(e.target.value) || 0)))}
-                  style={{ width: 70, minHeight: 38, padding: '6px 8px', display: 'inline-block' }}
-                  aria-label={`${names.nuria} percent`}
-                />{' '}
+                <PctInput value={100 - tomPct} onChange={(p) => setTomPct(100 - p)} label={`${names.nuria} percent`} />{' '}
                 % {names.nuria}
               </label>
             </div>
@@ -549,5 +533,28 @@ export function ExpenseForm(props: Props) {
         </details>
       ) : null}
     </Sheet>
+  );
+}
+
+/**
+ * A 0–100 percentage box. While you're typing it shows exactly what you typed (so "33." or "33,5"
+ * isn't snapped back to "33"), and applies the number as you go; leaving it tidies the text.
+ */
+function PctInput({ value, onChange, label }: { value: number; onChange: (pct: number) => void; label: string }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      className="input num"
+      inputMode="decimal"
+      value={draft ?? String(round2(value))}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const v = parseMoney(e.target.value);
+        onChange(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
+      }}
+      onBlur={() => setDraft(null)}
+      style={{ width: 70, minHeight: 38, padding: '6px 8px', display: 'inline-block' }}
+      aria-label={label}
+    />
   );
 }
