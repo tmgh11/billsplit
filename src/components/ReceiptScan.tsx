@@ -15,7 +15,8 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
   const { settings, device } = useStore();
   const names = settings.names;
   const base = settings.baseCurrency;
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null); // photo library
+  const cameraRef = useRef<HTMLInputElement>(null); // opens the camera directly
 
   const [stage, setStage] = useState<Stage>('pick');
   const [progress, setProgress] = useState({ p: 0, label: '' });
@@ -132,27 +133,34 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
         ) : undefined
       }
     >
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*"
-        hidden
-        onChange={(e) => {
-          void onFile(e.target.files?.[0]);
-          e.target.value = '';
-        }}
-      />
+      {[fileRef, cameraRef].map((ref, i) => (
+        <input
+          key={i}
+          ref={ref}
+          type="file"
+          accept="image/*"
+          {...(ref === cameraRef ? { capture: 'environment' as const } : {})}
+          hidden
+          onChange={(e) => {
+            void onFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
+      ))}
 
       {stage === 'pick' && (
         <>
-          <button className="dropzone" style={{ width: '100%' }} onClick={() => fileRef.current?.click()}>
+          <button className="dropzone" style={{ width: '100%' }} onClick={() => cameraRef.current?.click()}>
             <div className="action primary" style={{ minHeight: 0, width: 64, height: 64, borderRadius: 20, padding: 0 }}>
               <Icon name="camera" size={28} />
             </div>
-            <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--text)' }}>Take or choose a photo</div>
+            <div style={{ fontWeight: 700, fontSize: 17, color: 'var(--text)' }}>Take photo</div>
             <div style={{ fontSize: 14 }}>Lay the receipt flat, fill the frame, good light. Everything is read on your phone — nothing is uploaded.</div>
           </button>
-          <button className="btn" style={{ marginTop: 12 }} onClick={() => { setStage('review'); addRow(); }}>
+          <button className="btn" style={{ marginTop: 12 }} onClick={() => fileRef.current?.click()}>
+            <Icon name="upload" size={18} /> Choose from photos
+          </button>
+          <button className="btn" style={{ marginTop: 10, background: 'transparent', color: 'var(--text-2)' }} onClick={() => { setStage('review'); addRow(); }}>
             Or enter items by hand
           </button>
         </>
@@ -275,9 +283,14 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
               ))}
             </select>
           </div>
-          <button className="btn" onClick={() => fileRef.current?.click()}>
-            <Icon name="camera" size={18} /> Scan a different photo
-          </button>
+          <div className="btn-row">
+            <button className="btn" onClick={() => cameraRef.current?.click()}>
+              <Icon name="camera" size={18} /> Retake
+            </button>
+            <button className="btn" onClick={() => fileRef.current?.click()}>
+              <Icon name="upload" size={18} /> Choose photo
+            </button>
+          </div>
         </>
       )}
     </Sheet>
