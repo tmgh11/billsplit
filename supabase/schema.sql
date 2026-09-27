@@ -40,6 +40,14 @@ create policy "members update" on public.entries for update to authenticated
   using (public.is_member()) with check (public.is_member());
 -- (no delete policy: the app soft-deletes so the other phone learns about deletions)
 
+-- Explicit table access for signed-in users (works whether or not "Automatically expose
+-- new tables" was ticked when the project was created). Row-level security above still
+-- limits it to the two member emails; logged-out visitors get nothing.
+grant usage on schema public to authenticated;
+grant select, insert, update on public.entries to authenticated;
+revoke all on public.entries from anon;
+revoke all on public.members from anon;
+
 -- 3. Server-side timestamps + last-write-wins when both phones edit the same thing offline.
 create or replace function public.entries_touch() returns trigger
 language plpgsql as $$
