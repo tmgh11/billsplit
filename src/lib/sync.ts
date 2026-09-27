@@ -17,7 +17,11 @@ let debounce: number | undefined;
 
 export function supabaseConfig() {
   const d = store.getDevice();
-  const url = (d.supabaseUrl || import.meta.env.VITE_SUPABASE_URL || '').trim();
+  // accept the URL however it was copied (e.g. with /rest/v1/ from the Data API page)
+  const url = (d.supabaseUrl || import.meta.env.VITE_SUPABASE_URL || '')
+    .trim()
+    .replace(/\/(rest|auth)\/v1\/?$/, '')
+    .replace(/\/+$/, '');
   const key = (d.supabaseKey || import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
   return url && key ? { url, key } : null;
 }
