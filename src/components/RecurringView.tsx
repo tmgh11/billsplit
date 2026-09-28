@@ -1,4 +1,4 @@
-import { Icon } from './ui';
+import { Icon, primeKeyboard } from './ui';
 import { categoryById } from '../lib/categories';
 import { fmt, pctForSplit } from '../lib/money';
 import { addDays, prettyDate, today } from '../lib/dates';
@@ -32,7 +32,13 @@ export function RecurringView({ open }: { open: (s: SheetState) => void }) {
             <span className="muted" style={{ fontSize: 15, fontWeight: 500 }}> / month</span>
           </div>
         </div>
-        <button className="btn primary small" onClick={() => open({ type: 'recurring' })}>
+        <button
+          className="btn primary small"
+          onClick={() => {
+            primeKeyboard(); // so the amount keyboard opens on iPhone too
+            open({ type: 'recurring' });
+          }}
+        >
           <Icon name="plus" size={18} /> New
         </button>
       </div>

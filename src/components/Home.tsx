@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Icon } from './ui';
+import { Icon, primeKeyboard } from './ui';
 import { balance, describeBalance, expenseEffect, fmt, pctForSplit } from '../lib/money';
 import { prettyDate } from '../lib/dates';
 import { CATEGORIES, categoryById } from '../lib/categories';
@@ -159,7 +159,13 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
         <button className="btn settle" disabled={!owing} onClick={() => open({ type: 'settle' })}>
           <Icon name="arrows" size={20} /> Settle up
         </button>
-        <button className="btn primary add" onClick={() => open({ type: 'expense' })}>
+        <button
+          className="btn primary add"
+          onClick={() => {
+            primeKeyboard(); // so the amount keyboard opens on iPhone too
+            open({ type: 'expense' });
+          }}
+        >
           <Icon name="plus" size={22} stroke={2.4} /> Add expense
         </button>
       </div>

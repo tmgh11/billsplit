@@ -26,6 +26,10 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
   /** id for a new settle up, fixed when the sheet opens so a double tap can't record it twice */
   const [draftId] = useState(newId);
 
+  // Has anything been changed since the sheet opened? Closing then asks first.
+  const formState = JSON.stringify([from, currency, amountText, date, note]);
+  const [openedState] = useState(formState);
+
   useEffect(() => {
     if (currency === base) return setRate(1);
     // back to the settle up's own currency: restore the rate it was saved with
@@ -82,6 +86,8 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
     <Sheet
       title={initial ? 'Edit settle up' : 'Settle up'}
       onClose={onClose}
+      dirty={formState !== openedState}
+      discardPrompt={initial ? 'Discard your changes?' : 'Discard this settle up?'}
       headerAction={
         initial && (
           // away from Save, so a one-handed tap can't delete by mistake (and Undo is offered)

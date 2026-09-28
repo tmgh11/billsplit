@@ -75,6 +75,11 @@ export function ExpenseForm(props: Props) {
   /** id for a new entry, fixed when the sheet opens so a double tap on Save can't add it twice */
   const [draftId] = useState(newId);
 
+  // Has anything been entered or changed since the sheet opened? Closing then asks first.
+  const formState = JSON.stringify([amountText, currency, description, paidBy, split, tomPct, date, note, repeat, frequency, startDate, endDate, dates]);
+  const [openedState] = useState(formState);
+  const dirty = formState !== openedState;
+
   const amount = parseMoney(amountText);
   // iOS's date picker has a Reset button that leaves the field empty
   const dateOk = isRecurring ? frequency === 'dates' || isISODate(startDate) : isISODate(date);
@@ -246,6 +251,8 @@ export function ExpenseForm(props: Props) {
       title={title}
       onClose={props.onClose}
       full
+      dirty={dirty}
+      discardPrompt={isEdit ? 'Discard your changes?' : isRecurring ? 'Discard this repeating expense?' : 'Discard this expense?'}
       headerAction={
         isEdit ? (
           // away from Save, so a one-handed tap can't delete by mistake (and Undo is offered)

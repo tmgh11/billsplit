@@ -179,6 +179,9 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
     <Sheet
       title="Scan receipt"
       onClose={onClose}
+      // a scanned (or hand-entered) receipt is work worth confirming before throwing away
+      dirty={stage !== 'pick'}
+      discardPrompt="Discard this receipt?"
       full
       footer={
         stage === 'review' ? (

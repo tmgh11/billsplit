@@ -68,6 +68,8 @@ export function Sheet({
   footer,
   full,
   headerAction,
+  dirty,
+  discardPrompt = 'Discard your changes?',
 }: {
   title: ReactNode;
   onClose: () => void;
@@ -76,13 +78,23 @@ export function Sheet({
   full?: boolean;
   /** an extra button shown in the header, before the close button */
   headerAction?: ReactNode;
+  /** something has been entered: closing (other than by saving) asks before throwing it away */
+  dirty?: boolean;
+  discardPrompt?: string;
 }) {
   const layerRef = useRef<HTMLDivElement>(null);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [confirming, setConfirming] = useState(false);
+  // Closing with ×, the backdrop, Escape or a swipe. Kept in a ref so the listeners below always
+  // see the latest `dirty` without being re-attached.
+  const requestClose = useRef(() => {});
+  requestClose.current = () => (dirty ? setConfirming(true) : onClose());
 
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && requestClose.current();
     window.addEventListener('keydown', onKey);
 
     // iPhone Safari doesn't shrink the page when the keyboard opens – it slides the whole page
@@ -114,27 +126,122 @@ export function Sheet({
       vv?.removeEventListener('scroll', fit);
       cancelAnimationFrame(raf);
     };
-  }, [onClose]);
+  }, []);
+
+  // Swipe down to close, from the header or from content that's scrolled to the top – the
+  // close button is in the hardest corner to reach one-handed.
+  useEffect(() => {
+    const sheet = sheetRef.current;
+    const body = bodyRef.current;
+    if (!sheet || !body) return;
+    let tracking = false;
+    let dragging = false;
+    let startY = 0;
+    let startT = 0;
+    let dy = 0;
+    const onStart = (e: TouchEvent) => {
+      const t = e.target as HTMLElement;
+      // leave controls alone, and content that's scrolled down scrolls as normal
+      if (t.closest('input, select, textarea') || (body.contains(t) && body.scrollTop > 0)) return;
+      tracking = true;
+      dragging = false;
+      startY = e.touches[0].clientY;
+      startT = e.timeStamp;
+      dy = 0;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!tracking) return;
+      dy = e.touches[0].clientY - startY;
+      if (!dragging) {
+        if (dy < -4) tracking = false; // scrolling up: not a swipe
+        if (dy < 8) return;
+        dragging = true;
+        sheet.style.transition = 'none';
+      }
+      e.preventDefault(); // the sheet follows the finger instead of the content scrolling
+      sheet.style.transform = `translateY(${Math.max(0, dy)}px)`;
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (!tracking) return;
+      tracking = false;
+      if (!dragging) return;
+      const fast = dy / Math.max(1, e.timeStamp - startT) > 0.6;
+      sheet.style.transition = 'transform 0.2s ease';
+      sheet.style.transform = '';
+      if (dy > 120 || (fast && dy > 40)) requestClose.current();
+    };
+    sheet.addEventListener('touchstart', onStart, { passive: true });
+    sheet.addEventListener('touchmove', onMove, { passive: false });
+    sheet.addEventListener('touchend', onEnd);
+    sheet.addEventListener('touchcancel', onEnd);
+    return () => {
+      sheet.removeEventListener('touchstart', onStart);
+      sheet.removeEventListener('touchmove', onMove);
+      sheet.removeEventListener('touchend', onEnd);
+      sheet.removeEventListener('touchcancel', onEnd);
+    };
+  }, []);
+
+  const discard = (
+    <div role="alertdialog" aria-labelledby="discard-q">
+      <p id="discard-q" className="discard-q">{discardPrompt}</p>
+      <div className="btn-row">
+        <button type="button" className="btn" onClick={() => setConfirming(false)}>
+          Keep editing
+        </button>
+        <button type="button" className="btn discard" onClick={onClose}>
+          Discard
+        </button>
+      </div>
+    </div>
+  );
 
   return createPortal(
     <>
-      <div className="sheet-backdrop" onClick={onClose} />
+      <div className="sheet-backdrop" onClick={() => requestClose.current()} />
       <div className="sheet-layer" ref={layerRef}>
-        <div className={`sheet${full ? ' full' : ''}`} role="dialog" aria-modal="true">
+        <div className={`sheet${full ? ' full' : ''}`} role="dialog" aria-modal="true" ref={sheetRef}>
           <div className="sheet-head">
             <h2>{title}</h2>
             {headerAction}
-            <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <button className="icon-btn" onClick={() => requestClose.current()} aria-label="Close">
               <Icon name="close" size={18} />
             </button>
           </div>
-          <div className="sheet-body">{children}</div>
-          {footer && <div className="sheet-foot">{footer}</div>}
+          <div className="sheet-body" ref={bodyRef}>
+            {children}
+          </div>
+          {(confirming || footer) && <div className="sheet-foot">{confirming ? discard : footer}</div>}
         </div>
       </div>
     </>,
     document.body,
   );
+}
+
+let primer: HTMLInputElement | null = null;
+
+/**
+ * iPhone Safari only raises the keyboard for an input focused during the tap itself, and a
+ * sheet's amount box appears a moment after. Call this in the tap that opens such a sheet: an
+ * invisible input takes the focus straight away so the keyboard starts opening, then the sheet's
+ * own field (autoFocus) takes the focus, and the keyboard, over. The sheet sits above the
+ * keyboard (see Sheet), so the amount stays in view.
+ */
+export function primeKeyboard() {
+  if (!primer) {
+    primer = document.createElement('input');
+    primer.setAttribute('inputmode', 'decimal');
+    primer.setAttribute('aria-hidden', 'true');
+    primer.tabIndex = -1;
+    primer.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;border:0;padding:0;font-size:16px;pointer-events:none';
+    document.body.appendChild(primer);
+  }
+  primer.focus({ preventScroll: true });
+  // never leave the keyboard typing into an invisible box if nothing takes over
+  const p = primer;
+  window.setTimeout(() => document.activeElement === p && p.blur(), 600);
 }
 
 export function Seg<T extends string>({

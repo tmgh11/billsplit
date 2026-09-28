@@ -358,6 +358,8 @@ select.input {
 .sheet-head .head-action { margin: 4px 8px 0 0; background: var(--surface); border: 1px solid var(--border-strong); }
 .sheet-head .head-action.delete { color: var(--danger); }
 .btn.save { flex-direction: column; gap: 1px; min-height: 58px; }
+.discard-q { margin: 0 0 12px; font-size: 16px; font-weight: 650; }
+.btn.discard { background: var(--danger); color: #fff; }
 .btn.save .save-sub { font-size: 14px; font-weight: 550; opacity: 0.8; }
 .btn.link-btn { background: none; color: var(--tom); padding: 0 2px; margin-bottom: 8px; }
 .shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
