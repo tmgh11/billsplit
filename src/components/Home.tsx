@@ -143,7 +143,7 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
                   </div>
                   <div className="row-amt num">
                     <div className="main good">{fmt(r.s.amount, r.s.currency)}</div>
-                    <div className="eff muted">Settlement</div>
+                    <div className="eff muted">Settle up</div>
                   </div>
                 </button>
               ),

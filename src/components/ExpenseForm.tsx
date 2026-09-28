@@ -117,7 +117,7 @@ export function ExpenseForm(props: Props) {
   const explanation =
     !baseTotal ? null : owed === 0 ? (
       <>
-        {names[paidBy]} paid for their own thing — <strong>no one owes anything</strong>. It still counts in analytics.
+        {names[paidBy]} paid for their own thing — <strong>no one owes anything</strong>. It still counts in Spending.
       </>
     ) : (
       <>
@@ -553,7 +553,7 @@ function PctInput({ value, onChange, label }: { value: number; onChange: (pct: n
         onChange(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
       }}
       onBlur={() => setDraft(null)}
-      style={{ width: 70, minHeight: 38, padding: '6px 8px', display: 'inline-block' }}
+      style={{ width: 70, minHeight: 44, padding: '6px 8px', display: 'inline-block' }}
       aria-label={label}
     />
   );

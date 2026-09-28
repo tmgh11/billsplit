@@ -217,7 +217,7 @@ export function Analytics() {
           );
         })}
       </div>
-      <p className="small-print">Settlements aren’t spending, so they’re left out. Foreign-currency expenses use the rate on the day they were added.</p>
+      <p className="small-print">Settling up isn’t spending, so it’s left out. Foreign-currency expenses use the rate on the day they were added.</p>
     </>
   );
 }

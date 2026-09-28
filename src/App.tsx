@@ -19,7 +19,7 @@ export type SheetState =
 
 type Tab = 'ledger' | 'stats' | 'repeat' | 'settings';
 
-const TITLES: Record<Tab, string> = { ledger: 'Billsplit', stats: 'Spending', repeat: 'Repeating', settings: 'Settings' };
+const TITLES: Record<Tab, string> = { ledger: 'Ledger', stats: 'Spending', repeat: 'Repeating', settings: 'Settings' };
 
 export default function App() {
   const { sync, device, settings, loaded } = useStore();

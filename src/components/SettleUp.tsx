@@ -23,12 +23,12 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
   const [date, setDate] = useState(initial?.date ?? today());
   const [note, setNote] = useState(initial?.note ?? '');
 
-  /** id for a new payment, fixed when the sheet opens so a double tap can't record it twice */
+  /** id for a new settle up, fixed when the sheet opens so a double tap can't record it twice */
   const [draftId] = useState(newId);
 
   useEffect(() => {
     if (currency === base) return setRate(1);
-    // back to the payment's own currency: restore the rate it was saved with
+    // back to the settle up's own currency: restore the rate it was saved with
     if (initial && initial.currency === currency) return setRate(initial.rate);
     let live = true;
     setRate(null);
@@ -67,20 +67,20 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
     };
     store.put(s);
     haptic();
-    toast(Math.abs(remaining) < 0.005 ? 'All settled up 🎉' : 'Payment recorded');
+    toast(Math.abs(remaining) < 0.005 ? 'All settled up 🎉' : 'Settle up recorded');
     onClose();
   };
 
   const remove = () => {
     if (!initial) return;
     store.remove(initial.id);
-    toast('Payment deleted', { label: 'Undo', run: () => store.put({ ...initial, deleted: false }) });
+    toast('Settle up deleted', { label: 'Undo', run: () => store.put({ ...initial, deleted: false }) });
     onClose();
   };
 
   return (
     <Sheet
-      title={initial ? 'Edit payment' : 'Settle up'}
+      title={initial ? 'Edit settle up' : 'Settle up'}
       onClose={onClose}
       footer={
         <div className="btn-row">
@@ -90,7 +90,7 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
             </button>
           )}
           <button className="btn good" disabled={!valid} onClick={save}>
-            <Icon name="check" size={20} /> {initial ? 'Save payment' : 'Record payment'}
+            <Icon name="check" size={20} /> {initial ? 'Save changes' : 'Settle up'}
           </button>
         </div>
       }
@@ -108,14 +108,14 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
 
       <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 14, marginBottom: 16 }}>
         <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="muted" style={{ fontSize: 12 }}>From</div>
+          <div className="muted" style={{ fontSize: 13 }}>From</div>
           <div className={from} style={{ fontWeight: 700, fontSize: 18 }}>{names[from]}</div>
         </div>
         <button className="icon-btn" style={{ marginTop: 0 }} onClick={() => setFrom(to)} aria-label="Swap direction">
           <Icon name="arrows" size={18} />
         </button>
         <div style={{ flex: 1, textAlign: 'center' }}>
-          <div className="muted" style={{ fontSize: 12 }}>To</div>
+          <div className="muted" style={{ fontSize: 13 }}>To</div>
           <div className={to} style={{ fontWeight: 700, fontSize: 18 }}>{names[to]}</div>
         </div>
       </div>

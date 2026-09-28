@@ -57,7 +57,7 @@ export function RecurringView({ open }: { open: (s: SheetState) => void }) {
             const split = r.split === 'equal' ? '50/50' : r.split === 'tom' ? `${names.tom}’s` : r.split === 'nuria' ? `${names.nuria}’s` : `${Math.round(pct)}/${Math.round(100 - pct)}`;
             return (
               <div key={r.id} className="row" style={{ opacity: r.paused ? 0.55 : 1 }}>
-                <button className="cat-ic" onClick={() => open({ type: 'recurring', recurring: r })} aria-label={`Edit ${r.description}`}>
+                <button className="cat-ic" style={{ width: 44, height: 44 }} onClick={() => open({ type: 'recurring', recurring: r })} aria-label={`Edit ${r.description}`}>
                   {c.emoji}
                 </button>
                 <button className="row-main" style={{ textAlign: 'left' }} onClick={() => open({ type: 'recurring', recurring: r })}>
@@ -73,7 +73,7 @@ export function RecurringView({ open }: { open: (s: SheetState) => void }) {
                   <div className="main">{fmt(r.amount, r.currency)}</div>
                   <button
                     className="btn small"
-                    style={{ minHeight: 30, padding: '0 10px', marginTop: 4, fontSize: 12 }}
+                    style={{ padding: '0 12px', marginTop: 4, fontSize: 13 }}
                     onClick={() => {
                       if (!r.paused) return store.put({ ...r, paused: true });
                       // resuming: don't back-fill dates that passed while paused

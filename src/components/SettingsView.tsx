@@ -258,7 +258,7 @@ export function SettingsView() {
         <div className="card pad" style={{ marginTop: 12 }}>
           <div style={{ fontWeight: 700, marginBottom: 6 }}>Splitwise import</div>
           <p className="text-2" style={{ fontSize: 14, marginTop: 0 }}>
-            Found {sw.parsed.expenses.length} expenses and {sw.parsed.settlements.length} payments. Which column is {settings.names.tom}?
+            Found {sw.parsed.expenses.length} expenses and {sw.parsed.settlements.length} times you settled up. Which column is {settings.names.tom}?
           </p>
           <Seg<'0' | '1'>
             value={String(sw.tomCol) as '0' | '1'}

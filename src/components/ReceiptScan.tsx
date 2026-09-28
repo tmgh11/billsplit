@@ -328,7 +328,7 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
                 <div className="r-top">
                   <div className="name" style={{ fontSize: 14 }}>
                     <strong>Basket discount</strong>
-                    <div className="muted" style={{ fontSize: 12.5 }}>Split in proportion to what each of you bought</div>
+                    <div className="muted" style={{ fontSize: 13 }}>Split in proportion to what each of you bought</div>
                   </div>
                   <span className="num good" style={{ fontWeight: 700 }}>{fmt(basketDiscount, currency)}</span>
                   <button className="icon-btn" style={{ marginTop: 0 }} aria-label="Remove basket discount" onClick={() => setBasketDiscount(0)}>
