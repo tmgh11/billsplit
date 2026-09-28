@@ -67,12 +67,15 @@ export function Sheet({
   children,
   footer,
   full,
+  headerAction,
 }: {
   title: ReactNode;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   full?: boolean;
+  /** an extra button shown in the header, before the close button */
+  headerAction?: ReactNode;
 }) {
   const layerRef = useRef<HTMLDivElement>(null);
 
@@ -120,6 +123,7 @@ export function Sheet({
         <div className={`sheet${full ? ' full' : ''}`} role="dialog" aria-modal="true">
           <div className="sheet-head">
             <h2>{title}</h2>
+            {headerAction}
             <button className="icon-btn" onClick={onClose} aria-label="Close">
               <Icon name="close" size={18} />
             </button>

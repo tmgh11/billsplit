@@ -67,10 +67,13 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <h1>{TITLES[tab]}</h1>
-        <button className="sync-pill" onClick={() => go('settings')} aria-label={`Sync status: ${pill}`}>
-          <span className={`dot ${dot}`} />
-          {pill}
-        </button>
+        {/* the Ledger's balance card shows sync status itself */}
+        {tab !== 'ledger' && (
+          <button className="sync-pill" onClick={() => go('settings')} aria-label={`Sync status: ${pill}`}>
+            <span className={`dot ${dot}`} />
+            {pill}
+          </button>
+        )}
       </header>
 
       <main>
@@ -84,15 +87,14 @@ export default function App() {
         <div className="tabbar-inner">
           <TabBtn active={tab === 'ledger'} onClick={() => go('ledger')} icon="list" label="Ledger" />
           <TabBtn active={tab === 'stats'} onClick={() => go('stats')} icon="chart" label="Spending" />
-          <button className="fab" onClick={() => setSheet({ type: 'expense' })} aria-label="Add expense">
-            <Icon name="plus" size={28} stroke={2.4} />
-          </button>
           <TabBtn active={tab === 'repeat'} onClick={() => go('repeat')} icon="repeat" label="Repeating" />
           <TabBtn active={tab === 'settings'} onClick={() => go('settings')} icon="settings" label="Settings" />
         </div>
       </nav>
 
-      {sheet?.type === 'expense' && <ExpenseForm mode="expense" initial={sheet.expense} onClose={close} />}
+      {sheet?.type === 'expense' && (
+        <ExpenseForm mode="expense" initial={sheet.expense} onClose={close} onScan={() => setSheet({ type: 'receipt' })} />
+      )}
       {sheet?.type === 'recurring' && <ExpenseForm mode="recurring" initial={sheet.recurring} onClose={close} />}
       {sheet?.type === 'settle' && <SettleUp initial={sheet.settlement} onClose={close} />}
       {sheet?.type === 'receipt' && <ReceiptScan onClose={close} />}

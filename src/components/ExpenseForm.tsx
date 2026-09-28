@@ -19,7 +19,7 @@ import type { Expense, Frequency, Person, Recurring, SplitMode } from '../lib/ty
 import { prettyDate } from '../lib/dates';
 
 type Props =
-  | { mode: 'expense'; initial?: Expense; onClose: () => void }
+  | { mode: 'expense'; initial?: Expense; onClose: () => void; /** switch to scanning a receipt instead */ onScan?: () => void }
   | { mode: 'recurring'; initial?: Recurring; onClose: () => void };
 
 const FREQS: { value: Frequency; label: string }[] = [
@@ -241,6 +241,13 @@ export function ExpenseForm(props: Props) {
       title={title}
       onClose={props.onClose}
       full
+      headerAction={
+        props.mode === 'expense' && !isEdit && props.onScan ? (
+          <button type="button" className="btn small head-action" onClick={props.onScan}>
+            <Icon name="camera" size={18} /> Scan receipt
+          </button>
+        ) : undefined
+      }
       footer={
         clashes ? (
           <div role="alertdialog" aria-labelledby="clash-q">

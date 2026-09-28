@@ -1,23 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Icon } from './ui';
-import { balance, basePence, describeBalance, expenseEffect, fmt } from '../lib/money';
-import { monthKey, monthLabel, prettyDate } from '../lib/dates';
+import { balance, describeBalance, expenseEffect, fmt, pctForSplit } from '../lib/money';
+import { prettyDate } from '../lib/dates';
 import { CATEGORIES, categoryById } from '../lib/categories';
-import { useStore } from '../lib/store';
-import type { Expense, Settlement } from '../lib/types';
+import { useStore, type Snapshot } from '../lib/store';
+import type { Expense, Person, Settlement } from '../lib/types';
 import type { SheetState } from '../App';
 
 type Row = { type: 'expense'; e: Expense } | { type: 'settlement'; s: Settlement };
 
 export function Home({ open }: { open: (s: SheetState) => void }) {
-  const { expenses, settlements, settings } = useStore();
+  const { expenses, settlements, settings, device, sync } = useStore();
   const { names, baseCurrency: base } = settings;
+  const me = device.me;
   const [query, setQuery] = useState('');
   const [cat, setCat] = useState<string | null>(null);
   const [limit, setLimit] = useState(80);
 
   const bal = useMemo(() => balance(expenses, settlements), [expenses, settlements]);
   const owing = describeBalance(bal);
+  const lastSettled = settlements[0]?.date; // newest first
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -29,7 +31,7 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
     }
     if (!cat) {
       for (const s of settlements) {
-        if (q && !`payment settle ${s.note ?? ''} ${names[s.from]} ${names[s.to]}`.toLowerCase().includes(q)) continue;
+        if (q && !`settle up payment ${s.note ?? ''} ${names[s.from]} ${names[s.to]}`.toLowerCase().includes(q)) continue;
         list.push({ type: 'settlement', s, date: s.date, updatedAt: s.updatedAt });
       }
     }
@@ -37,60 +39,53 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
     return list;
   }, [expenses, settlements, query, cat, names]);
 
-  const grouped = useMemo(() => {
-    const out: { key: string; rows: typeof rows; spend: number }[] = [];
+  // one group per day, newest first
+  const days = useMemo(() => {
+    const out: { date: string; rows: typeof rows }[] = [];
     for (const r of rows.slice(0, limit)) {
-      const k = monthKey(r.date);
-      let g = out[out.length - 1];
-      if (!g || g.key !== k) out.push((g = { key: k, rows: [], spend: 0 }));
-      g.rows.push(r);
-      if (r.type === 'expense') g.spend += basePence(r.e);
+      const last = out[out.length - 1];
+      if (last?.date === r.date) last.rows.push(r);
+      else out.push({ date: r.date, rows: [r] });
     }
     return out;
   }, [rows, limit]);
 
   const usedCats = useMemo(() => new Set(expenses.map((e) => e.category)), [expenses]);
+  const who = (p: Person) => (p === me ? 'You' : names[p]);
+  const status = syncStatus(sync);
 
   return (
     <>
-      <div className="card balance">
-        <div className="label">{owing ? 'Running balance' : 'Balance'}</div>
+      <section className="card balance" aria-label="Balance">
         {owing ? (
           <>
-            <div className="amount num">{fmt(owing.amount, base)}</div>
-            <div className="flow">
-              <span className={owing.debtor}>{names[owing.debtor]}</span>
-              <span className="muted">owes</span>
-              <span className={owing.creditor}>{names[owing.creditor]}</span>
+            <div className="headline">
+              {owing.debtor === me ? (
+                <>
+                  You owe <span className={owing.creditor}>{names[owing.creditor]}</span>
+                </>
+              ) : (
+                <>
+                  <span className={owing.debtor}>{names[owing.debtor]}</span> owes you
+                </>
+              )}
             </div>
+            <div className="amount num">{fmt(owing.amount, base)}</div>
           </>
         ) : (
           <>
+            <div className="headline">Nobody owes anything</div>
             <div className="amount">All square</div>
-            <div className="flow muted" style={{ fontWeight: 500 }}>No one owes anything 🎉</div>
           </>
         )}
-      </div>
-
-      <div className="actions">
-        <button className="action primary" onClick={() => open({ type: 'expense' })}>
-          <span className="ic"><Icon name="plus" /></span>
-          Add expense
-        </button>
-        <button className="action" onClick={() => open({ type: 'receipt' })}>
-          <span className="ic"><Icon name="camera" /></span>
-          Scan receipt
-        </button>
-        <button className="action" onClick={() => open({ type: 'settle' })}>
-          <span className="ic" style={{ color: 'var(--good)' }}><Icon name="arrows" /></span>
-          Settle up
-        </button>
-      </div>
-
-      <div className="section-title">
-        <span>Ledger</span>
-        <span className="aside">{expenses.length + settlements.length} entries</span>
-      </div>
+        <div className="meta">
+          {lastSettled && <span>Last settled up {relativeDay(lastSettled)}</span>}
+          <span className={`status ${status.tone}`}>
+            <span className={`dot ${status.tone}`} aria-hidden="true" />
+            {status.text}
+          </span>
+        </div>
+      </section>
 
       {expenses.length + settlements.length > 0 && (
         <>
@@ -98,52 +93,53 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
             <Icon name="search" size={18} />
             <input
               type="search"
-              placeholder="Search"
+              placeholder="Search expenses"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              aria-label="Search the ledger"
+              aria-label="Search expenses"
             />
           </label>
-          <div className="filters">
-            <button className={`chip ${!cat ? 'on' : ''}`} onClick={() => setCat(null)}>All</button>
-            {CATEGORIES.filter((c) => usedCats.has(c.id)).map((c) => (
-              <button key={c.id} className={`chip ${cat === c.id ? 'on' : ''}`} onClick={() => setCat(cat === c.id ? null : c.id)}>
-                {c.emoji} {c.label}
-              </button>
-            ))}
-          </div>
+          {usedCats.size > 1 && (
+            <div className="filters">
+              <button className={`chip ${!cat ? 'on' : ''}`} onClick={() => setCat(null)}>All</button>
+              {CATEGORIES.filter((c) => usedCats.has(c.id)).map((c) => (
+                <button key={c.id} className={`chip ${cat === c.id ? 'on' : ''}`} onClick={() => setCat(cat === c.id ? null : c.id)}>
+                  {c.emoji} {c.label}
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
 
-      {grouped.length === 0 && (
+      {days.length === 0 && (
         <div className="card empty">
           <div className="big">🧾</div>
-          {query || cat ? 'Nothing matches that.' : 'No expenses yet. Add one or scan a receipt to get started.'}
+          {query || cat ? 'Nothing matches that.' : 'No expenses yet. Tap Add expense below to get started.'}
         </div>
       )}
 
-      {grouped.map((g) => (
-        <div key={g.key}>
-          <div className="month-head">
-            <span>{monthLabel(g.key)}</span>
-            <span className="num">{fmt(g.spend / 100, base)} spent</span>
-          </div>
+      {days.map((d) => (
+        <div key={d.date}>
+          <h3 className="day-head">{prettyDate(d.date)}</h3>
           <div className="card list">
-            {g.rows.map((r) =>
+            {d.rows.map((r) =>
               r.type === 'expense' ? (
-                <ExpenseRow key={r.e.id} e={r.e} base={base} names={names} onClick={() => open({ type: 'expense', expense: r.e })} />
+                <ExpenseRow key={r.e.id} e={r.e} me={me} base={base} who={who} names={names} onClick={() => open({ type: 'expense', expense: r.e })} />
               ) : (
                 <button key={r.s.id} className="row settle-row" onClick={() => open({ type: 'settle', settlement: r.s })}>
-                  <div className="cat-ic">💸</div>
+                  <div className="cat-ic" aria-hidden="true">
+                    <Icon name="arrows" size={18} />
+                  </div>
                   <div className="row-main">
                     <div className="row-title">
-                      {names[r.s.from]} paid {names[r.s.to]}
+                      {who(r.s.from)} paid {r.s.to === me ? 'you' : names[r.s.to]}
                     </div>
-                    <div className="row-sub">{prettyDate(r.s.date)}{r.s.note ? ` · ${r.s.note}` : ''}</div>
+                    <div className="row-sub">{r.s.note || 'Settle up'}</div>
                   </div>
                   <div className="row-amt num">
-                    <div className="main good">{fmt(r.s.amount, r.s.currency)}</div>
-                    <div className="eff muted">Settle up</div>
+                    <div className="main">{fmt(r.s.amount, r.s.currency)}</div>
+                    <div className="eff good">Settle up</div>
                   </div>
                 </button>
               ),
@@ -157,28 +153,76 @@ export function Home({ open }: { open: (s: SheetState) => void }) {
           Show older
         </button>
       )}
+
+      {/* thumb-reach actions, fixed above the tab bar */}
+      <div className="home-actions">
+        <button className="btn settle" disabled={!owing} onClick={() => open({ type: 'settle' })}>
+          <Icon name="arrows" size={20} /> Settle up
+        </button>
+        <button className="btn primary add" onClick={() => open({ type: 'expense' })}>
+          <Icon name="plus" size={22} stroke={2.4} /> Add expense
+        </button>
+      </div>
     </>
   );
 }
 
+/** "today", "yesterday" or "Thu 10 Sept", to follow other words in a sentence. */
+function relativeDay(date: string) {
+  const d = prettyDate(date);
+  return d === 'Today' || d === 'Yesterday' ? d.toLowerCase() : d;
+}
+
+/** The balance card's sync line, so a stale balance is never mistaken for a current one. */
+function syncStatus(sync: Snapshot['sync']): { text: string; tone: 'ok' | 'busy' | 'warn' | 'bad' | '' } {
+  switch (sync.state) {
+    case 'synced': {
+      const mins = sync.lastSynced ? Math.floor((Date.now() - sync.lastSynced) / 60_000) : 0;
+      const at = sync.lastSynced ? new Date(sync.lastSynced).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '';
+      return { text: mins < 1 ? 'Synced just now' : mins < 60 ? `Synced ${mins} min ago` : `Synced at ${at}`, tone: 'ok' };
+    }
+    case 'syncing':
+      return { text: 'Syncing…', tone: 'busy' };
+    case 'offline':
+      return { text: 'Offline · changes will sync later', tone: 'warn' };
+    case 'error':
+      return { text: 'Not syncing · see Settings', tone: 'bad' };
+    case 'signed-out':
+      return { text: 'Signed out · not syncing', tone: 'warn' };
+    default:
+      return { text: 'Only on this phone', tone: '' };
+  }
+}
+
+/** "50/50", "all yours", "all Nuria’s" or "60% yours", from the viewer's side. */
+function splitLabel(e: Expense, me: Person, names: Record<Person, string>): string {
+  if (e.split === 'equal') return '50/50';
+  if (e.split === 'tom' || e.split === 'nuria') return e.split === me ? 'all yours' : `all ${names[e.split]}’s`;
+  const tomPct = pctForSplit(e.split, e.tomPct);
+  return `${Math.round(me === 'tom' ? tomPct : 100 - tomPct)}% yours`;
+}
+
 function ExpenseRow({
   e,
+  me,
   base,
+  who,
   names,
   onClick,
 }: {
   e: Expense;
+  me: Person;
   base: string;
-  names: Record<'tom' | 'nuria', string>;
+  who: (p: Person) => string;
+  names: Record<Person, string>;
   onClick: () => void;
 }) {
   const c = categoryById(e.category);
-  const eff = expenseEffect(e);
-  const splitLabel =
-    e.split === 'equal' ? '50/50' : e.split === 'tom' ? `${names.tom}’s` : e.split === 'nuria' ? `${names.nuria}’s` : `${Math.round(e.tomPct)}/${Math.round(100 - e.tomPct)}`;
+  // what this expense does to the balance, seen from this phone's owner
+  const eff = expenseEffect(e) * (me === 'tom' ? 1 : -1);
   return (
     <button className="row" onClick={onClick}>
-      <div className="cat-ic">
+      <div className="cat-ic" aria-hidden="true">
         {c.emoji}
         {e.recurringId && (
           <span className="badge" title="Repeating">
@@ -189,15 +233,15 @@ function ExpenseRow({
       <div className="row-main">
         <div className="row-title">{e.description}</div>
         <div className="row-sub">
-          {prettyDate(e.date)} · <span className={e.paidBy}>{names[e.paidBy]}</span> paid · {splitLabel}
+          <span className={e.paidBy}>{who(e.paidBy)}</span> paid · {splitLabel(e, me, names)}
         </div>
       </div>
       <div className="row-amt num">
         <div className="main">{fmt(e.amount, e.currency)}</div>
-        {Math.abs(eff) >= 0.005 ? (
-          <div className={`eff ${eff > 0 ? 'nuria' : 'tom'}`}>
-            {eff > 0 ? names.nuria : names.tom} owes {fmt(Math.abs(eff), base)}
-          </div>
+        {eff > 0 ? (
+          <div className="eff good">+{fmt(eff, base)} to you</div>
+        ) : eff < 0 ? (
+          <div className="eff owe">−{fmt(-eff, base)} you owe</div>
         ) : (
           <div className="eff muted">not shared</div>
         )}
@@ -205,3 +249,4 @@ function ExpenseRow({
     </button>
   );
 }
+
