@@ -88,18 +88,18 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
       onClose={onClose}
       dirty={formState !== openedState}
       discardPrompt={initial ? 'Discard your changes?' : 'Discard this settle up?'}
-      headerAction={
-        initial && (
-          // away from Save, so a one-handed tap can't delete by mistake (and Undo is offered)
-          <button type="button" className="btn small head-action delete" onClick={remove}>
-            <Icon name="trash" size={18} /> Delete
-          </button>
-        )
-      }
       footer={
-        <button className="btn good" disabled={!valid} onClick={save}>
-          <Icon name="check" size={20} /> {initial ? 'Save changes' : 'Settle up'}
-        </button>
+        <div className="btn-row">
+          {initial && (
+            // labelled and full height, so it's never mistaken for Save (and Undo is offered)
+            <button type="button" className="btn delete" onClick={remove}>
+              <Icon name="trash" size={18} /> Delete
+            </button>
+          )}
+          <button className="btn good" disabled={!valid} onClick={save}>
+            <Icon name="check" size={20} /> {initial ? 'Save changes' : 'Settle up'}
+          </button>
+        </div>
       }
     >
       <div className="note" style={{ marginBottom: 16 }}>

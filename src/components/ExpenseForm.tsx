@@ -254,12 +254,7 @@ export function ExpenseForm(props: Props) {
       dirty={dirty}
       discardPrompt={isEdit ? 'Discard your changes?' : isRecurring ? 'Discard this repeating expense?' : 'Discard this expense?'}
       headerAction={
-        isEdit ? (
-          // away from Save, so a one-handed tap can't delete by mistake (and Undo is offered)
-          <button type="button" className="btn small head-action delete" onClick={onDelete}>
-            <Icon name="trash" size={18} /> Delete
-          </button>
-        ) : props.mode === 'expense' && props.onScan ? (
+        !isEdit && props.mode === 'expense' && props.onScan ? (
           <button type="button" className="btn small head-action" onClick={props.onScan}>
             <Icon name="camera" size={18} /> Scan receipt
           </button>
@@ -300,18 +295,26 @@ export function ExpenseForm(props: Props) {
             </div>
           </div>
         ) : (
-          <button className="btn primary save" disabled={!valid} onClick={() => onSave()}>
-            <span>
-              {isEdit
-                ? 'Save changes'
-                : isRecurring || repeat
-                  ? 'Save & schedule'
-                  : isValidAmount(amount)
-                    ? `Add ${fmt(round2(amount), currency)}`
-                    : 'Add expense'}
-            </span>
-            {valid && outcome && <span className="save-sub">{outcome}</span>}
-          </button>
+          <div className="btn-row">
+            {isEdit && (
+              // labelled and full height, so it's never mistaken for Save (and Undo is offered)
+              <button type="button" className="btn delete" onClick={onDelete}>
+                <Icon name="trash" size={18} /> Delete
+              </button>
+            )}
+            <button className="btn primary save" disabled={!valid} onClick={() => onSave()}>
+              <span>
+                {isEdit
+                  ? 'Save changes'
+                  : isRecurring || repeat
+                    ? 'Save & schedule'
+                    : isValidAmount(amount)
+                      ? `Add ${fmt(round2(amount), currency)}`
+                      : 'Add expense'}
+              </span>
+              {valid && outcome && <span className="save-sub">{outcome}</span>}
+            </button>
+          </div>
         )
       }
     >
