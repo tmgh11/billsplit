@@ -9,6 +9,7 @@ A small, fast web app for Tom and Nuria to split shared costs. It replaces Split
 - **Repeating expenses.** Weekly, every 2 weeks, monthly, yearly, or a list of set dates. They're added automatically when a phone syncs, including any missed while nobody had the app open. A phone that's offline waits until it's back online, so it never re-adds something the other phone has since edited, paused or deleted.
 - **Scan receipt** (top of Add expense). Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared** on each item. The uneven totals go straight into the ledger.
 - **Spending.** Monthly totals, a 6-month chart and a category breakdown. You can view it for the household or for each person's share.
+- **Shortcuts.** One-tap descriptions in Add expense (Tesco, M&S, Sainsbury’s and Amazon to start with). Change them in **Settings → Add expense shortcuts**.
 - **Categories.** These are guessed from the description ("Tesco" → Groceries, "Council tax" → Bills). If you override a guess, the app learns it for next time.
 - **Your data.** Import your Splitwise history, export to CSV, and make full backups.
 

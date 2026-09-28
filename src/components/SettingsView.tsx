@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Icon, Seg, toast } from './ui';
+import { ShortcutsEditor } from './ShortcutsEditor';
 import { store, useStore } from '../lib/store';
 import { configBakedIn, resetClient, signIn, signOut, supabaseConfig, syncNow } from '../lib/sync';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
@@ -175,6 +176,8 @@ export function SettingsView() {
           )}
         </div>
       </div>
+
+      <ShortcutsEditor />
 
       <div className="section-title">Sync between phones</div>
       <div className="card pad">
