@@ -74,7 +74,7 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
   const remove = () => {
     if (!initial) return;
     store.remove(initial.id);
-    toast('Settle up deleted', { label: 'Undo', run: () => store.put({ ...initial, deleted: false }) });
+    toast('Settle up deleted', { label: 'Undo', run: () => store.put({ ...initial, deleted: false }) }, 8000);
     onClose();
   };
 
@@ -82,17 +82,18 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
     <Sheet
       title={initial ? 'Edit settle up' : 'Settle up'}
       onClose={onClose}
-      footer={
-        <div className="btn-row">
-          {initial && (
-            <button className="btn danger" style={{ width: 'auto' }} onClick={remove} aria-label="Delete">
-              <Icon name="trash" size={20} />
-            </button>
-          )}
-          <button className="btn good" disabled={!valid} onClick={save}>
-            <Icon name="check" size={20} /> {initial ? 'Save changes' : 'Settle up'}
+      headerAction={
+        initial && (
+          // away from Save, so a one-handed tap can't delete by mistake (and Undo is offered)
+          <button type="button" className="btn small head-action delete" onClick={remove}>
+            <Icon name="trash" size={18} /> Delete
           </button>
-        </div>
+        )
+      }
+      footer={
+        <button className="btn good" disabled={!valid} onClick={save}>
+          <Icon name="check" size={20} /> {initial ? 'Save changes' : 'Settle up'}
+        </button>
       }
     >
       <div className="note" style={{ marginBottom: 16 }}>

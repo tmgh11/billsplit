@@ -12,7 +12,7 @@ export const CATEGORIES: Category[] = [
     emoji: '🛒',
     keywords: [
       'tesco', 'sainsbury', 'asda', 'aldi', 'lidl', 'waitrose', 'morrisons', 'co-op', 'coop', 'ocado',
-      'm&s food', 'iceland', 'grocer', 'supermarket', 'food shop', 'big shop', 'groceries', 'mercadona',
+      'm&s food', 'm&s', 'iceland', 'grocer', 'supermarket', 'food shop', 'big shop', 'groceries', 'mercadona',
       'carrefour', 'milk', 'bread', 'veg', 'fruit', 'butcher', 'bakery', 'deli', 'wholefoods', 'gail',
     ],
   },

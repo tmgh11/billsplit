@@ -79,11 +79,17 @@ export interface Settings extends Base {
   baseCurrency: string;
   /** learned description → category overrides */
   categoryRules: Record<string, string>;
+  /** one-tap descriptions offered in Add expense (edited in Settings) */
+  shortcuts: string[];
 }
 
 export type Entry = Expense | Settlement | Recurring | Settings;
 
 export const SETTINGS_ID = 'settings';
+
+export const DEFAULT_SHORTCUTS = ['Tesco', 'M&S', 'Sainsbury’s', 'Amazon'];
+/** keeps the four shortcut buttons on one line on a phone (the Settings preview checks it) */
+export const SHORTCUT_MAX_LENGTH = 12;
 
 export function defaultSettings(): Settings {
   return {
@@ -92,6 +98,7 @@ export function defaultSettings(): Settings {
     names: { tom: 'Tom', nuria: 'Nuria' },
     baseCurrency: 'GBP',
     categoryRules: {},
+    shortcuts: DEFAULT_SHORTCUTS,
     updatedAt: 0,
   };
 }

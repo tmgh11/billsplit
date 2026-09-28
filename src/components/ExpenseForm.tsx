@@ -3,7 +3,7 @@ import { DateHint, Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
 import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import { baseAmount, fmt, hasOddPenny, isValidAmount, parseMoney, pctForSplit, round2, shares } from '../lib/money';
-import { isISODate, today } from '../lib/dates';
+import { addDays, isISODate, today } from '../lib/dates';
 import {
   addedUntil,
   describeFrequency,
@@ -15,7 +15,7 @@ import {
   type Clash,
 } from '../lib/recurring';
 import { newId, store, useStore } from '../lib/store';
-import type { Expense, Frequency, Person, Recurring, SplitMode } from '../lib/types';
+import { other, type Expense, type Frequency, type Person, type Recurring, type SplitMode } from '../lib/types';
 import { prettyDate } from '../lib/dates';
 
 type Props =
@@ -51,6 +51,15 @@ export function ExpenseForm(props: Props) {
   const [tomPct, setTomPct] = useState(init ? pctForSplit(init.split, init.tomPct) : 50);
   const [date, setDate] = useState(init && 'date' in init ? init.date : today());
   const [note, setNote] = useState((init && 'note' in init && init.note) || '');
+  const me = device.me;
+  const them = other(me);
+  // "When?": today and yesterday are one tap; any other day shows the date picker
+  const todayISO = today();
+  const yesterdayISO = addDays(todayISO, -1);
+  const [otherDay, setOtherDay] = useState(date !== todayISO && date !== yesterdayISO);
+  const when = otherDay ? 'other' : date === todayISO ? 'today' : 'yesterday';
+  // note and repeat are folded away until asked for (or already in use)
+  const [showMore, setShowMore] = useState(Boolean(note));
 
   const recInit = isRecurring ? (init as Recurring | undefined) : undefined;
   const [repeat, setRepeat] = useState(isRecurring);
@@ -114,27 +123,22 @@ export function ExpenseForm(props: Props) {
   // each repeat has its own id, so a half-penny split alternates who pays the odd penny
   const oddPennyVaries = isRecurring && hasOddPenny(preview);
 
-  const explanation =
-    !baseTotal ? null : owed === 0 ? (
-      <>
-        {names[paidBy]} paid for their own thing — <strong>no one owes anything</strong>. It still counts in Spending.
-      </>
-    ) : (
-      <>
-        <strong className={debtor}>{names[debtor]}</strong> owes <strong className={paidBy}>{names[paidBy]}</strong>{' '}
-        <strong>{fmt(owed, base)}</strong>
-        {oddPennyVaries && ' (give or take the odd penny, which alternates)'}
-      </>
-    );
+  // What saving will do, shown on the Save button so it can't be missed (or hidden by the keyboard).
+  const outcome = !baseTotal
+    ? null
+    : owed === 0
+      ? 'No one owes anything'
+      : (debtor === me ? `You owe ${names[paidBy]} ${fmt(owed, base)}` : `${names[debtor]} owes you ${fmt(owed, base)}`) +
+        (oddPennyVaries ? ' (± the odd penny)' : '');
 
   const splitOptions = useMemo(
     () => [
-      { value: 'equal' as const, label: '50/50', sub: 'Shared' },
-      { value: 'tom' as const, label: names.tom, sub: 'All theirs', className: 'tom' },
-      { value: 'nuria' as const, label: names.nuria, sub: 'All theirs', className: 'nuria' },
-      { value: 'custom' as const, label: 'Custom', sub: 'Set %' },
+      { value: 'equal' as const, label: '50/50' },
+      { value: me as SplitMode, label: 'Mine', className: me },
+      { value: them as SplitMode, label: `${names[them]}’s`, className: them },
+      { value: 'custom' as const, label: 'Custom' },
     ],
-    [names],
+    [names, me, them],
   );
 
   // learn the category the user chose for this description
@@ -226,10 +230,11 @@ export function ExpenseForm(props: Props) {
     if (!init) return;
     const snapshot = store.get(init.id);
     store.remove(init.id);
-    toast(isRecurring ? 'Repeating expense deleted' : 'Expense deleted', {
-      label: 'Undo',
-      run: () => snapshot && store.put({ ...snapshot, deleted: false }),
-    });
+    toast(
+      isRecurring ? 'Repeating expense deleted' : 'Expense deleted',
+      { label: 'Undo', run: () => snapshot && store.put({ ...snapshot, deleted: false }) },
+      8000,
+    );
     props.onClose();
   };
 
@@ -242,7 +247,12 @@ export function ExpenseForm(props: Props) {
       onClose={props.onClose}
       full
       headerAction={
-        props.mode === 'expense' && !isEdit && props.onScan ? (
+        isEdit ? (
+          // away from Save, so a one-handed tap can't delete by mistake (and Undo is offered)
+          <button type="button" className="btn small head-action delete" onClick={onDelete}>
+            <Icon name="trash" size={18} /> Delete
+          </button>
+        ) : props.mode === 'expense' && props.onScan ? (
           <button type="button" className="btn small head-action" onClick={props.onScan}>
             <Icon name="camera" size={18} /> Scan receipt
           </button>
@@ -283,16 +293,18 @@ export function ExpenseForm(props: Props) {
             </div>
           </div>
         ) : (
-          <div className="btn-row">
-            {isEdit && (
-              <button className="btn danger" style={{ width: 'auto' }} onClick={onDelete} aria-label="Delete">
-                <Icon name="trash" size={20} />
-              </button>
-            )}
-            <button className="btn primary" disabled={!valid} onClick={() => onSave()}>
-              {isEdit ? 'Save changes' : isRecurring || repeat ? 'Save & schedule' : 'Add expense'}
-            </button>
-          </div>
+          <button className="btn primary save" disabled={!valid} onClick={() => onSave()}>
+            <span>
+              {isEdit
+                ? 'Save changes'
+                : isRecurring || repeat
+                  ? 'Save & schedule'
+                  : isValidAmount(amount)
+                    ? `Add ${fmt(round2(amount), currency)}`
+                    : 'Add expense'}
+            </span>
+            {valid && outcome && <span className="save-sub">{outcome}</span>}
+          </button>
         )
       }
     >
@@ -351,6 +363,18 @@ export function ExpenseForm(props: Props) {
           autoComplete="off"
           enterKeyHint="done"
         />
+        {!isEdit && settings.shortcuts.length > 0 && (
+          <div className="shortcuts" role="group" aria-label="Shortcuts">
+            {settings.shortcuts.map((s) => {
+              const on = description.trim().toLowerCase() === s.toLowerCase();
+              return (
+                <button key={s} type="button" className={`chip${on ? ' on' : ''}`} aria-pressed={on} onClick={() => setDescription(s)}>
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="field">
@@ -384,20 +408,20 @@ export function ExpenseForm(props: Props) {
       </div>
 
       <div className="field">
-        <div className="field-label">Paid by</div>
+        <div className="field-label">Who paid?</div>
         <Seg
           value={paidBy}
           onChange={setPaidBy}
           options={[
-            { value: 'tom', label: names.tom, className: 'tom' },
-            { value: 'nuria', label: names.nuria, className: 'nuria' },
+            { value: me, label: 'You', className: me },
+            { value: them, label: names[them], className: them },
           ]}
         />
       </div>
 
       <div className="field">
         <div className="field-label">Whose cost is it?</div>
-        <Seg tall value={split} onChange={setSplit} options={splitOptions} />
+        <Seg value={split} onChange={setSplit} options={splitOptions} />
         {split === 'custom' && (
           <div className="card pad" style={{ marginTop: 10, padding: 14 }}>
             <div className="inline" style={{ alignItems: 'center', marginBottom: 6 }}>
@@ -429,21 +453,46 @@ export function ExpenseForm(props: Props) {
         )}
       </div>
 
-      {explanation && (
-        <div className={`note ${owed === 0 ? '' : debtor}`} style={{ marginBottom: 16 }}>
-          <span>{explanation}</span>
-        </div>
-      )}
-
       {!isRecurring && (
         <div className="field">
-          <label htmlFor="date">Date</label>
-          <input id="date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
-          <DateHint value={date} />
+          <div className="field-label">When?</div>
+          <Seg
+            value={when}
+            onChange={(v) => {
+              setOtherDay(v === 'other');
+              if (v === 'today') setDate(todayISO);
+              if (v === 'yesterday') setDate(yesterdayISO);
+            }}
+            options={[
+              { value: 'today', label: 'Today' },
+              { value: 'yesterday', label: 'Yesterday' },
+              { value: 'other', label: when === 'other' && isISODate(date) ? prettyDate(date) : 'Other day' },
+            ]}
+          />
+          {when === 'other' && (
+            <>
+              <input
+                id="date"
+                type="date"
+                className="input"
+                style={{ marginTop: 8 }}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                aria-label="Date"
+              />
+              <DateHint value={date} />
+            </>
+          )}
         </div>
       )}
 
-      {!isRecurring && !isEdit && (
+      {!isRecurring && !showMore && (
+        <button type="button" className="btn small link-btn" onClick={() => setShowMore(true)}>
+          {isEdit ? 'Add a note' : 'Add a note or repeat…'}
+        </button>
+      )}
+
+      {!isRecurring && !isEdit && showMore && (
         <div className="card" style={{ padding: '10px 14px', marginBottom: 16 }}>
           <div className="toggle-row">
             <div>
@@ -519,7 +568,7 @@ export function ExpenseForm(props: Props) {
         </div>
       )}
 
-      {!isRecurring && (
+      {!isRecurring && showMore && (
         <div className="field">
           <label htmlFor="note">Note (optional)</label>
           <input id="note" className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything to remember" />

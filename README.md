@@ -7,7 +7,7 @@ A small, fast web app for Tom and Nuria to split shared costs. It replaces Split
 - **Any currency.** Live rates come from [ExchangeRate-API](https://www.exchangerate-api.com), and each expense keeps the rate from the day it was added. The ledger's own currency (the one balances are shown in) is picked before the first entry and fixed after that.
 - **Settle up.** Record a full or partial transfer in either direction.
 - **Repeating expenses.** Weekly, every 2 weeks, monthly, yearly, or a list of set dates. They're added automatically when a phone syncs, including any missed while nobody had the app open. A phone that's offline waits until it's back online, so it never re-adds something the other phone has since edited, paused or deleted.
-- **Scan receipt.** Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared** on each item. The uneven totals go straight into the ledger.
+- **Scan receipt** (top of Add expense). Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared** on each item. The uneven totals go straight into the ledger.
 - **Spending.** Monthly totals, a 6-month chart and a category breakdown. You can view it for the household or for each person's share.
 - **Categories.** These are guessed from the description ("Tesco" → Groceries, "Council tax" → Bills). If you override a guess, the app learns it for next time.
 - **Your data.** Import your Splitwise history, export to CSV, and make full backups.
@@ -61,7 +61,7 @@ Every expense has **who paid** and **whose cost it is**:
 | Tom | All Tom's | Nobody owes anything, but it still counts in Spending |
 | Nuria | Custom 70/30 (Tom/Nuria) | Tom owes Nuria 70% |
 
-The form always spells out the result ("Nuria owes Tom £12.30") before you save.
+The Save button always spells out the result ("Nuria owes you £12.30") before you tap it.
 
 For a receipt, the Tom items plus half the Shared items are Tom's cost, and the rest is Nuria's. It's saved as one expense with a custom split, and the item list is kept on the expense.
 

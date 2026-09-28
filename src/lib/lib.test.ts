@@ -257,6 +257,9 @@ describe('categories', () => {
     expect(guessCategory('Netflix')).toBe('entertainment');
     expect(guessCategory('Mortgage')).toBe('mortgage');
     expect(guessCategory('Dinner at Dishoom')).toBe('eating-out');
+    // the default Add expense shortcuts
+    for (const s of ['Tesco', 'M&S', 'Sainsbury’s']) expect(guessCategory(s)).toBe('groceries');
+    expect(guessCategory('Amazon')).toBe('shopping');
   });
   it('learned rule wins', () => {
     expect(guessCategory('Tesco', learnRule('Tesco', 'home'))).toBe('home');
