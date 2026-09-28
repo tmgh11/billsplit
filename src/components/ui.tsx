@@ -1,6 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { isISODate } from '../lib/dates';
 
 type IconName =
   | 'plus' | 'camera' | 'arrows' | 'repeat' | 'chart' | 'list' | 'settings' | 'close' | 'trash' | 'check'
@@ -74,29 +73,59 @@ export function Sheet({
   footer?: ReactNode;
   full?: boolean;
 }) {
+  const layerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
+
+    // iPhone Safari doesn't shrink the page when the keyboard opens – it slides the whole page
+    // up instead, which can push the top of a tall sheet off-screen. Pin the sheet to the part
+    // of the screen that's actually visible (the "visual viewport") so it sits above the keyboard.
+    const vv = window.visualViewport;
+    const layer = layerRef.current;
+    let raf = 0;
+    const fit = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (!vv || !layer) return;
+        layer.style.top = `${vv.offsetTop}px`;
+        layer.style.height = `${vv.height}px`;
+        const keyboardOpen = window.innerHeight - vv.height > 120;
+        layer.classList.toggle('kb', keyboardOpen);
+        // keep whatever is being typed into in view
+        const active = document.activeElement as HTMLElement | null;
+        if (keyboardOpen && active && layer.contains(active)) active.scrollIntoView({ block: 'nearest' });
+      });
+    };
+    fit();
+    vv?.addEventListener('resize', fit);
+    vv?.addEventListener('scroll', fit);
     return () => {
       document.body.style.overflow = prev;
       window.removeEventListener('keydown', onKey);
+      vv?.removeEventListener('resize', fit);
+      vv?.removeEventListener('scroll', fit);
+      cancelAnimationFrame(raf);
     };
   }, [onClose]);
 
   return createPortal(
     <>
       <div className="sheet-backdrop" onClick={onClose} />
-      <div className={`sheet${full ? ' full' : ''}`} role="dialog" aria-modal="true">
-        <div className="sheet-head">
-          <h2>{title}</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="close" size={18} />
-          </button>
+      <div className="sheet-layer" ref={layerRef}>
+        <div className={`sheet${full ? ' full' : ''}`} role="dialog" aria-modal="true">
+          <div className="sheet-head">
+            <h2>{title}</h2>
+            <button className="icon-btn" onClick={onClose} aria-label="Close">
+              <Icon name="close" size={18} />
+            </button>
+          </div>
+          <div className="sheet-body">{children}</div>
+          {footer && <div className="sheet-foot">{footer}</div>}
         </div>
-        <div className="sheet-body">{children}</div>
-        {footer && <div className="sheet-foot">{footer}</div>}
       </div>
     </>,
     document.body,
@@ -180,16 +209,6 @@ export function ToastHost() {
         </button>
       )}
     </div>
-  );
-}
-
-/** Shown under a date input left empty (iOS's date picker has a Reset button). */
-export function DateHint({ value }: { value: string }) {
-  if (isISODate(value)) return null;
-  return (
-    <p className="small-print" style={{ color: 'var(--danger)' }} role="alert">
-      Pick a date
-    </p>
   );
 }
 
