@@ -23,7 +23,9 @@ self.addEventListener('fetch', (event) => {
 
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req)
+      // GitHub Pages lets browsers reuse the page for 10 minutes; 'no-cache' asks the server whether
+      // it changed every time (a tiny 304 when it hasn't), so a new release shows on the next open.
+      fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
         .then((res) => {
           if (res.ok) event.waitUntil(updateShell(res.clone()));
           return res;
