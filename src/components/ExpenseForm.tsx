@@ -476,20 +476,16 @@ export function ExpenseForm(props: Props) {
             options={[
               { value: 'today', label: 'Today' },
               { value: 'yesterday', label: 'Yesterday' },
-              { value: 'other', label: when === 'other' && isISODate(date) ? prettyDate(date) : 'Other day' },
+              // always "Other day": showing the date here read as a second Today/Yesterday button
+              { value: 'other', label: 'Other day' },
             ]}
           />
           {when === 'other' && (
             <>
-              <input
-                id="date"
-                type="date"
-                className="input"
-                style={{ marginTop: 8 }}
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-                aria-label="Date"
-              />
+              <label htmlFor="date" className="field-label" style={{ marginTop: 12 }}>
+                Which day?
+              </label>
+              <input id="date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
               <DateHint value={date} />
             </>
           )}
