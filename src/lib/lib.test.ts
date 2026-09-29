@@ -27,7 +27,7 @@ import {
 import { guessCategory, learnRule } from './categories';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise, planSplitwiseImport } from './splitwise';
-import { isISODate, rewindTimestamp } from './dates';
+import { isISODate, latestAllowedDate, rewindTimestamp, shortDate } from './dates';
 import { mergeLegacy } from './persist';
 import type { Expense, Recurring, Settlement } from './types';
 
@@ -153,6 +153,15 @@ describe('input checks', () => {
     expect(isValidAmount(0)).toBe(false);
     expect(isValidAmount(-5)).toBe(false);
     expect(isValidAmount(parseMoney(''))).toBe(false);
+  });
+  it('date pickers stop at today, unless the entry is already later', () => {
+    expect(latestAllowedDate(undefined, '2026-09-29')).toBe('2026-09-29');
+    expect(latestAllowedDate('2026-09-12', '2026-09-29')).toBe('2026-09-29');
+    expect(latestAllowedDate('2026-09-30', '2026-09-29')).toBe('2026-09-30'); // e.g. a moved rent payment
+  });
+  it('short dates for the Other day button', () => {
+    expect(shortDate('2026-09-12', '2026-09-29')).toBe('12 Sept');
+    expect(shortDate('2025-09-12', '2026-09-29')).toBe('12 Sept 2025');
   });
   it('dates must be real YYYY-MM-DD dates', () => {
     expect(isISODate('2026-09-27')).toBe(true);

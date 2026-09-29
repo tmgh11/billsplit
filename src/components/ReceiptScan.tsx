@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { DateHint, Icon, Seg, Sheet, haptic, toast } from './ui';
 import { ReceiptReader, mergeParts, receiptTotals, type ParsedReceipt } from '../lib/receipt';
 import { fmt, parseMoney, round2, shares } from '../lib/money';
-import { isISODate, today } from '../lib/dates';
+import { isISODate, latestAllowedDate, today } from '../lib/dates';
 import { CATEGORIES, guessCategory } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import { newId, store, useStore } from '../lib/store';
@@ -386,7 +386,14 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
           <div className="inline" style={{ marginTop: 16 }}>
             <div className="field">
               <label htmlFor="rdate">Date</label>
-              <input id="rdate" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+              <input
+                id="rdate"
+                type="date"
+                className="input"
+                value={date}
+                max={latestAllowedDate()}
+                onChange={(e) => e.target.value <= latestAllowedDate() && setDate(e.target.value)}
+              />
               <DateHint value={date} />
             </div>
             <div className="field">

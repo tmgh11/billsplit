@@ -57,6 +57,23 @@ export function shiftMonth(key: string, n: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
 }
 
+/**
+ * The latest date a date picker should allow: today, since expenses and settle ups are added after
+ * they happen (a future date is almost always a slip, and would hide the expense from Spending
+ * until that month). An entry already dated later (e.g. a moved repeating payment) keeps its date.
+ */
+export const latestAllowedDate = (existing?: string, todayISO = today()) =>
+  existing && existing > todayISO ? existing : todayISO;
+
+/** A date short enough for a button: "12 Sept" this year, "12 Sept 2025" otherwise. */
+export function shortDate(s: string, todayISO = today()): string {
+  return fromISO(s).toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: s.slice(0, 4) === todayISO.slice(0, 4) ? undefined : 'numeric',
+  });
+}
+
 export function prettyDate(s: string): string {
   const t = today();
   if (s === t) return 'Today';

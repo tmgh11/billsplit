@@ -3,7 +3,7 @@ import { DateHint, Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
 import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import { baseAmount, fmt, hasOddPenny, isValidAmount, parseMoney, pctForSplit, round2, shares } from '../lib/money';
-import { addDays, isISODate, today } from '../lib/dates';
+import { addDays, isISODate, latestAllowedDate, shortDate, today } from '../lib/dates';
 import {
   addedUntil,
   describeFrequency,
@@ -58,6 +58,7 @@ export function ExpenseForm(props: Props) {
   const yesterdayISO = addDays(todayISO, -1);
   const [otherDay, setOtherDay] = useState(date !== todayISO && date !== yesterdayISO);
   const when = otherDay ? 'other' : date === todayISO ? 'today' : 'yesterday';
+  const maxDate = latestAllowedDate(init && 'date' in init ? init.date : undefined, todayISO);
   // note and repeat are folded away until asked for (or already in use)
   const [showMore, setShowMore] = useState(Boolean(note));
 
@@ -465,30 +466,54 @@ export function ExpenseForm(props: Props) {
 
       {!isRecurring && (
         <div className="field">
-          <div className="field-label">When?</div>
-          <Seg
-            value={when}
-            onChange={(v) => {
-              setOtherDay(v === 'other');
-              if (v === 'today') setDate(todayISO);
-              if (v === 'yesterday') setDate(yesterdayISO);
-            }}
-            options={[
-              { value: 'today', label: 'Today' },
-              { value: 'yesterday', label: 'Yesterday' },
-              // always "Other day": showing the date here read as a second Today/Yesterday button
-              { value: 'other', label: 'Other day' },
-            ]}
-          />
-          {when === 'other' && (
-            <>
-              <label htmlFor="date" className="field-label" style={{ marginTop: 12 }}>
-                Which day?
-              </label>
-              <input id="date" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
-              <DateHint value={date} />
-            </>
-          )}
+          <div className="field-label" id="when-label">When?</div>
+          <div className="seg" role="radiogroup" aria-labelledby="when-label">
+            {(['today', 'yesterday'] as const).map((w) => (
+              <button
+                key={w}
+                type="button"
+                role="radio"
+                aria-checked={when === w}
+                className={when === w ? 'on' : ''}
+                onClick={() => {
+                  setOtherDay(false);
+                  setDate(w === 'today' ? todayISO : yesterdayISO);
+                }}
+              >
+                {w === 'today' ? 'Today' : 'Yesterday'}
+              </button>
+            ))}
+            {/* An invisible date field covers this button, so tapping it opens the phone's own
+                date picker straight away. It only changes once a day is actually picked (cancel
+                leaves Today/Yesterday as they were), then shows that day. */}
+            <label className={`seg-date${when === 'other' ? ' on' : ''}`}>
+              <span aria-hidden="true">{when === 'other' ? shortDate(date) : 'Other day'}</span>
+              <input
+                type="date"
+                value={date}
+                max={maxDate}
+                aria-label={when === 'other' ? `Other day: ${shortDate(date)}` : 'Other day'}
+                onClick={(e) => {
+                  // with a mouse, clicking a date field doesn't open its calendar by itself
+                  if (matchMedia('(pointer: fine)').matches) {
+                    try {
+                      e.currentTarget.showPicker();
+                    } catch {
+                      /* older browsers: the field is still usable */
+                    }
+                  }
+                }}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!isISODate(v)) return; // iOS's Reset clears the field: keep the day we had
+                  if (v > maxDate) return; // no future dates (typed ones included)
+                  setDate(v);
+                  // picking today's or yesterday's date lights up that button instead
+                  setOtherDay(v !== todayISO && v !== yesterdayISO);
+                }}
+              />
+            </label>
+          </div>
         </div>
       )}
 

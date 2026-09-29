@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DateHint, Icon, Sheet, haptic, toast } from './ui';
 import { balance, basePence, describeBalance, fmt, isValidAmount, parseMoney, round2, toPence } from '../lib/money';
-import { isISODate, today } from '../lib/dates';
+import { isISODate, latestAllowedDate, today } from '../lib/dates';
 import { newId, store, useStore } from '../lib/store';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import type { Person, Settlement } from '../lib/types';
@@ -21,6 +21,7 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
     initial ? String(initial.amount) : fullAmount ? fullAmount.toFixed(2) : '',
   );
   const [date, setDate] = useState(initial?.date ?? today());
+  const maxDate = latestAllowedDate(initial?.date); // no settling up in the future
   const [note, setNote] = useState(initial?.note ?? '');
 
   /** id for a new settle up, fixed when the sheet opens so a double tap can't record it twice */
@@ -173,7 +174,14 @@ export function SettleUp({ initial, onClose }: { initial?: Settlement; onClose: 
       <div className="inline">
         <div className="field">
           <label htmlFor="sdate">Date</label>
-          <input id="sdate" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          <input
+            id="sdate"
+            type="date"
+            className="input"
+            value={date}
+            max={maxDate}
+            onChange={(e) => e.target.value <= maxDate && setDate(e.target.value)}
+          />
           <DateHint value={date} />
         </div>
         <div className="field">
