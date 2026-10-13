@@ -3,6 +3,7 @@ import { Icon, primeKeyboard } from './ui';
 import { balance, describeBalance, expenseEffect, fmt, pctForSplit } from '../lib/money';
 import { prettyDate } from '../lib/dates';
 import { CATEGORIES, categoryById } from '../lib/categories';
+import { iconFor } from '../lib/icons';
 import { useStore, type Snapshot } from '../lib/store';
 import type { Expense, Person, Settlement } from '../lib/types';
 import type { SheetState } from '../App';
@@ -229,7 +230,7 @@ function ExpenseRow({
   return (
     <button className="row" onClick={onClick}>
       <div className="cat-ic" aria-hidden="true">
-        {c.emoji}
+        {iconFor(e.description, c.id)}
         {e.recurringId && (
           <span className="badge" title="Repeating">
             <Icon name="repeat" size={10} stroke={2.5} />

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon, PctInput, Seg, Sheet, haptic, primeKeyboard, toast } from './ui';
-import { categoryById, guessCategory } from '../lib/categories';
+import { guessCategory } from '../lib/categories';
+import { iconFor } from '../lib/icons';
 import { fmt, isValidAmount, parseMoney, round2 } from '../lib/money';
 import { today } from '../lib/dates';
 import { debitSharesPence, incomeTomPct, monthlyPence, ordinal, summariseDebits } from '../lib/debits';
@@ -147,7 +148,7 @@ function DebitRow({ d, onOpen }: { d: DirectDebit; onOpen: () => void }) {
   return (
     <button className="row" onClick={onOpen} aria-label={`Edit ${d.description}`}>
       <div className="cat-ic" style={{ width: 44, height: 44 }}>
-        {categoryById(d.category).emoji}
+        {iconFor(d.description, d.category)}
       </div>
       <div className="row-main">
         <div className="row-title">{d.description}</div>

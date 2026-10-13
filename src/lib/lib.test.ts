@@ -25,6 +25,7 @@ import {
   scheduleClashes,
 } from './recurring';
 import { guessCategory, learnRule } from './categories';
+import { iconFor } from './icons';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise, planSplitwiseImport } from './splitwise';
 import { isISODate, latestAllowedDate, rewindTimestamp, shortDate } from './dates';
@@ -262,7 +263,7 @@ describe('categories', () => {
     expect(guessCategory('Tesco big shop')).toBe('groceries');
     expect(guessCategory('Council tax')).toBe('bills');
     expect(guessCategory('Ryanair flights to Madrid')).toBe('travel');
-    expect(guessCategory('Car rental in Spain')).toBe(null);
+    expect(guessCategory('Car rental in Spain')).toBe('travel');
     expect(guessCategory('Gastropub')).toBe(null);
     expect(guessCategory('Netflix')).toBe('entertainment');
     expect(guessCategory('Mortgage')).toBe('mortgage');
@@ -273,6 +274,59 @@ describe('categories', () => {
   });
   it('learned rule wins', () => {
     expect(guessCategory('Tesco', learnRule('Tesco', 'home'))).toBe('home');
+  });
+  it('knows more UK names, and ignores apostrophes and punctuation', () => {
+    const cases: [string, string | null][] = [
+      ['JL sheets', 'home'],
+      ['John Lewis', 'home'],
+      ['Sainsburys', 'groceries'],
+      ["Sainsbury's local", 'groceries'],
+      ['Nandos', 'eating-out'],
+      ['Gail’s', 'groceries'],
+      ['Uber Eats', 'eating-out'],
+      ['Uber home', 'transport'],
+      ['Thames Water', 'bills'],
+      ['Octopus energy', 'bills'],
+      ['Giffgaff', 'bills'],
+      ['Wi-Fi', 'bills'],
+      ['Trainline - Edinburgh', 'transport'],
+      ['Premier Inn', 'travel'],
+      ['Pure Gym', 'health'],
+      ['Haircut', 'health'],
+      ['Mums birthday flowers', 'gifts'],
+      ['O2 Arena tickets', 'entertainment'],
+      ['Primark', 'shopping'],
+      ['Cleaner', 'home'],
+      ['Greggs', 'eating-out'],
+      ['Random thing', null],
+    ];
+    for (const [d, want] of cases) expect([d, guessCategory(d)]).toEqual([d, want]);
+  });
+  it('applies a learned rule to longer descriptions that contain it', () => {
+    const rules = learnRule('Hoppers', 'eating-out');
+    expect(guessCategory('Hoppers', rules)).toBe('eating-out');
+    expect(guessCategory('Hoppers with Ana', rules)).toBe('eating-out');
+    expect(guessCategory('Shoppers', rules)).toBe(null); // whole words only
+    // a learned rule beats a built-in keyword
+    expect(guessCategory('Amazon present', learnRule('Amazon', 'gifts'))).toBe('gifts');
+  });
+});
+
+describe('icons', () => {
+  it('picks a specific icon within the category', () => {
+    expect(iconFor('Council tax', 'bills')).toBe('🏛️');
+    expect(iconFor('Thames Water', 'bills')).toBe('💧');
+    expect(iconFor('Electric', 'bills')).toBe('⚡');
+    expect(iconFor('British Gas', 'bills')).toBe('🔥');
+    expect(iconFor('WiFi', 'bills')).toBe('📶');
+    expect(iconFor('Pret', 'eating-out')).toBe('☕');
+    expect(iconFor('Trainline', 'transport')).toBe('🚆');
+  });
+  it('falls back to the category icon, and never crosses categories', () => {
+    expect(iconFor('Mortgage', 'mortgage')).toBe('🏠');
+    expect(iconFor('Something', 'bills')).toBe('💡');
+    expect(iconFor('Water', 'eating-out')).toBe('🍽️'); // filed under Eating out: keeps its icon
+    expect(iconFor('Water', 'nope')).toBe('📦');
   });
 });
 

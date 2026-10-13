@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Icon, Seg, primeKeyboard } from './ui';
 import { DirectDebitsView } from './DirectDebits';
-import { categoryById } from '../lib/categories';
+import { iconFor } from '../lib/icons';
 import { fmt, pctForSplit } from '../lib/money';
 import { addDays, prettyDate, today } from '../lib/dates';
 import { describeFrequency, nextOccurrence } from '../lib/recurring';
@@ -87,13 +87,12 @@ function LedgerRepeats({ open }: { open: (s: SheetState) => void }) {
       {withNext.length > 0 && (
         <div className="card list">
           {withNext.map(({ r, next }) => {
-            const c = categoryById(r.category);
             const pct = pctForSplit(r.split, r.tomPct);
             const split = r.split === 'equal' ? '50/50' : r.split === 'tom' ? `${names.tom}’s` : r.split === 'nuria' ? `${names.nuria}’s` : `${Math.round(pct)}/${Math.round(100 - pct)}`;
             return (
               <div key={r.id} className="row" style={{ opacity: r.paused ? 0.55 : 1 }}>
                 <button className="cat-ic" style={{ width: 44, height: 44 }} onClick={() => open({ type: 'recurring', recurring: r })} aria-label={`Edit ${r.description}`}>
-                  {c.emoji}
+                  {iconFor(r.description, r.category)}
                 </button>
                 <button className="row-main" style={{ textAlign: 'left' }} onClick={() => open({ type: 'recurring', recurring: r })}>
                   <div className="row-title">{r.description}</div>
