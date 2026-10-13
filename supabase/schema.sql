@@ -19,16 +19,20 @@ language sql stable security definer set search_path = public as $$
   );
 $$;
 
--- 2. One table holds every expense, settlement, repeating expense and the shared settings.
+-- 2. One table holds every expense, settlement, repeating expense, direct debit and the shared settings.
 create table if not exists public.entries (
   id text primary key,
-  kind text not null check (kind in ('expense', 'settlement', 'recurring', 'settings')),
+  kind text not null check (kind in ('expense', 'settlement', 'recurring', 'debit', 'settings')),
   data jsonb not null,
   deleted boolean not null default false,
   client_updated_at bigint not null default 0,
   updated_at timestamptz not null default now()
 );
 create index if not exists entries_updated_at_idx on public.entries (updated_at);
+-- Databases made before direct debits existed: allow them too.
+alter table public.entries drop constraint if exists entries_kind_check;
+alter table public.entries add constraint entries_kind_check
+  check (kind in ('expense', 'settlement', 'recurring', 'debit', 'settings'));
 
 alter table public.entries enable row level security;
 drop policy if exists "members read" on public.entries;

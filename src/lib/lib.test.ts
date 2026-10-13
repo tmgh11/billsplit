@@ -28,8 +28,9 @@ import { guessCategory, learnRule } from './categories';
 import { mergeParts, parseReceiptText, receiptTotals, totalsMatch } from './receipt';
 import { parseSplitwise, planSplitwiseImport } from './splitwise';
 import { isISODate, latestAllowedDate, rewindTimestamp, shortDate } from './dates';
+import { debitSharesPence, incomeTomPct, monthlyPence, ordinal, summariseDebits } from './debits';
 import { mergeLegacy } from './persist';
-import type { Expense, Recurring, Settlement } from './types';
+import type { DirectDebit, Expense, Recurring, Settlement } from './types';
 
 const exp = (p: Partial<Expense>): Expense => ({
   id: Math.random().toString(), kind: 'expense', date: '2026-09-01', description: 'x', category: 'other',
@@ -577,5 +578,67 @@ describe('storage fallback', () => {
     expect(m.newer.map((e) => e.id)).toEqual(['a', 'c']);
     expect(m.dirty.sort()).toEqual(['a', 'c']);
     expect(m.cursor).toBeNull();
+  });
+});
+
+describe('direct debits', () => {
+  const salaries = { tom: 60000, nuria: 40000 };
+  const bill = (over: Partial<DirectDebit> = {}): DirectDebit => ({
+    id: 'd1', kind: 'debit', description: 'Water', category: 'bills', amount: 40, period: 'monthly',
+    paidBy: 'tom', split: 'income', tomPct: 50, updatedAt: 1, ...over,
+  });
+
+  it('works out the income ratio only once both salaries are in', () => {
+    expect(incomeTomPct(salaries)).toBe(60);
+    expect(incomeTomPct({ tom: 60000 })).toBeNull();
+    expect(incomeTomPct(undefined)).toBeNull();
+  });
+
+  it('shares by income, 50/50 or a fixed %', () => {
+    expect(debitSharesPence(bill(), salaries)).toEqual({ tom: 2400, nuria: 1600 });
+    expect(debitSharesPence(bill({ split: 'equal' }), salaries)).toEqual({ tom: 2000, nuria: 2000 });
+    expect(debitSharesPence(bill({ split: 'custom', tomPct: 70, amount: 1000 }), salaries)).toEqual({ tom: 70000, nuria: 30000 });
+    expect(debitSharesPence(bill(), {})).toBeNull();
+  });
+
+  it('turns a yearly bill into a monthly one, to the penny', () => {
+    expect(monthlyPence(bill({ amount: 2378.25, period: 'yearly' }))).toBe(19819); // £198.1875
+    const s = debitSharesPence(bill({ amount: 2378.25, period: 'yearly' }), salaries)!;
+    expect(s.tom + s.nuria).toBe(19819);
+  });
+
+  it('shares always add up to the bill, even with an awkward ratio', () => {
+    const odd = { tom: 45196, nuria: 41600 };
+    for (const amount of [1214.82, 125.88, 33.99, 39, 0.01]) {
+      const s = debitSharesPence(bill({ amount }), odd)!;
+      expect(s.tom + s.nuria).toBe(toPence(amount));
+    }
+  });
+
+  it('adds up who transfers what each month', () => {
+    const s = summariseDebits(
+      [
+        bill({ id: 'a', amount: 1000, split: 'custom', tomPct: 70 }), // Tom's account: Nuria sends £300
+        bill({ id: 'b', amount: 100, paidBy: 'nuria' }), // Nuria's account: Tom sends £60
+        bill({ id: 'c', amount: 50, paidBy: 'nuria', deleted: true }),
+      ],
+      salaries,
+    );
+    expect(s.totalPence).toBe(110000);
+    expect(s.nuriaToTomPence).toBe(30000);
+    expect(s.tomToNuriaPence).toBe(6000);
+    expect(s.sharePence).toEqual({ tom: 76000, nuria: 34000 });
+    expect(s.missingIncome).toBe(0);
+  });
+
+  it('leaves income-split bills out until both salaries are in', () => {
+    const s = summariseDebits([bill({ id: 'a' }), bill({ id: 'b', split: 'equal' })], { tom: 1 });
+    expect(s.totalPence).toBe(8000);
+    expect(s.nuriaToTomPence).toBe(2000);
+    expect(s.missingIncome).toBe(1);
+  });
+
+  it('writes day ordinals', () => {
+    expect([1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31].map(ordinal).join(' ')).toBe('1st 2nd 3rd 4th 11th 12th 13th 21st 22nd 23rd 31st');
   });
 });

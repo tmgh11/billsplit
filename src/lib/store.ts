@@ -4,7 +4,7 @@
  * when possible. Conflicts resolve last-write-wins on each entry's `updatedAt`.
  */
 import { useSyncExternalStore } from 'react';
-import type { Entry, Expense, Person, Recurring, Settings, Settlement } from './types';
+import type { DirectDebit, Entry, Expense, Person, Recurring, Settings, Settlement } from './types';
 import { SETTINGS_ID, defaultSettings } from './types';
 import { today } from './dates';
 import { GENERATED_STAMP, dueExpenses } from './recurring';
@@ -30,12 +30,13 @@ export interface Snapshot {
   expenses: Expense[];
   settlements: Settlement[];
   recurring: Recurring[];
+  debits: DirectDebit[];
   settings: Settings;
   device: DeviceSettings;
   sync: { state: SyncState; message?: string; lastSynced?: number; email?: string };
 }
 
-type Ledger = Pick<Snapshot, 'expenses' | 'settlements' | 'recurring' | 'settings'>;
+type Ledger = Pick<Snapshot, 'expenses' | 'settlements' | 'recurring' | 'debits' | 'settings'>;
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -120,6 +121,7 @@ class Store {
     const expenses: Expense[] = [];
     const settlements: Settlement[] = [];
     const recurring: Recurring[] = [];
+    const debits: DirectDebit[] = [];
     let settings = defaultSettings();
     for (const e of this.entries.values()) {
       if (e.kind === 'settings') settings = { ...defaultSettings(), ...e };
@@ -127,13 +129,14 @@ class Store {
       else if (e.kind === 'expense') expenses.push(e);
       else if (e.kind === 'settlement') settlements.push(e);
       else if (e.kind === 'recurring') recurring.push(e);
+      else if (e.kind === 'debit') debits.push(e);
     }
     const byDate = (a: { date: string; updatedAt: number }, b: { date: string; updatedAt: number }) =>
       b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt;
     expenses.sort(byDate);
     settlements.sort(byDate);
     recurring.sort((a, b) => a.description.localeCompare(b.description));
-    return { expenses, settlements, recurring, settings };
+    return { expenses, settlements, recurring, debits, settings };
   }
 
   /** Entries changed: rebuild the lists, write `ids` to the phone's storage, and update the UI. */

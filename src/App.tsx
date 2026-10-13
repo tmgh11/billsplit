@@ -6,15 +6,18 @@ import { SettingsView } from './components/SettingsView';
 import { ExpenseForm } from './components/ExpenseForm';
 import { SettleUp } from './components/SettleUp';
 import { ReceiptScan } from './components/ReceiptScan';
+import { DebitForm, SalariesForm } from './components/DirectDebits';
 import { Icon, ToastHost } from './components/ui';
 import { store, useStore } from './lib/store';
-import type { Expense, Recurring, Settlement } from './lib/types';
+import type { DirectDebit, Expense, Recurring, Settlement } from './lib/types';
 
 export type SheetState =
   | { type: 'expense'; expense?: Expense }
   | { type: 'recurring'; recurring?: Recurring }
   | { type: 'settle'; settlement?: Settlement }
   | { type: 'receipt' }
+  | { type: 'debit'; debit?: DirectDebit }
+  | { type: 'salaries' }
   | null;
 
 type Tab = 'ledger' | 'stats' | 'repeat' | 'settings';
@@ -98,6 +101,8 @@ export default function App() {
       {sheet?.type === 'recurring' && <ExpenseForm mode="recurring" initial={sheet.recurring} onClose={close} />}
       {sheet?.type === 'settle' && <SettleUp initial={sheet.settlement} onClose={close} />}
       {sheet?.type === 'receipt' && <ReceiptScan onClose={close} />}
+      {sheet?.type === 'debit' && <DebitForm initial={sheet.debit} onClose={close} />}
+      {sheet?.type === 'salaries' && <SalariesForm onClose={close} />}
       <ToastHost />
     </div>
   );

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { isISODate } from '../lib/dates';
+import { parseMoney, round2 } from '../lib/money';
 
 type IconName =
   | 'plus' | 'camera' | 'arrows' | 'repeat' | 'chart' | 'list' | 'settings' | 'close' | 'trash' | 'check'
@@ -340,4 +341,27 @@ export function haptic() {
   } catch {
     /* not supported (iOS) */
   }
+}
+
+/**
+ * A 0–100 percentage box. While you're typing it shows exactly what you typed (so "33." or "33,5"
+ * isn't snapped back to "33"), and applies the number as you go; leaving it tidies the text.
+ */
+export function PctInput({ value, onChange, label }: { value: number; onChange: (pct: number) => void; label: string }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  return (
+    <input
+      className="input num"
+      inputMode="decimal"
+      value={draft ?? String(round2(value))}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        const v = parseMoney(e.target.value);
+        onChange(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
+      }}
+      onBlur={() => setDraft(null)}
+      style={{ width: 70, minHeight: 44, padding: '6px 8px', display: 'inline-block' }}
+      aria-label={label}
+    />
+  );
 }

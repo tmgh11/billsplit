@@ -7,6 +7,7 @@ A small, fast web app for Tom and Nuria to split shared costs. It replaces Split
 - **Any currency.** Live rates come from [ExchangeRate-API](https://www.exchangerate-api.com), and each expense keeps the rate from the day it was added. The ledger's own currency (the one balances are shown in) is picked before the first entry and fixed after that.
 - **Settle up.** Record a full or partial transfer in either direction.
 - **Repeating expenses.** Weekly, every 2 weeks, monthly, yearly, or a list of set dates. They're added automatically when a phone syncs, including any missed while nobody had the app open. A phone that's offline waits until it's back online, so it never re-adds something the other phone has since edited, paused or deleted.
+- **Direct debits** (Repeating → Direct debits). The mortgage, council tax and other bills that go out of one person's account by direct debit. They never touch the ledger; the screen shows what each of you sends the other each month. Each bill is split by income (the ratio of your two salaries, entered on the same screen), 50/50, or a fixed % such as 70/30. Yearly bills are shared per month.
 - **Scan receipt** (top of Add expense). Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared** on each item. The uneven totals go straight into the ledger.
 - **Spending.** Monthly totals, a 6-month chart and a category breakdown. You can view it for the household or for each person's share.
 - **Shortcuts.** One-tap descriptions in Add expense (Tesco, M&S, Sainsbury’s and Amazon to start with). Change them in **Settings → Add expense shortcuts**.
@@ -75,6 +76,8 @@ npm test         # balance maths, recurring dates, receipt parsing, Splitwise im
 npm run build
 ```
 
+**Updating an existing database.** When a release adds a new kind of entry (direct debits did), run `supabase/schema.sql` again in **SQL Editor** (with your two emails at the bottom, as the first time) before or right after deploying. It's safe to re-run and leaves your data alone. Until then, syncing shows an error asking you to do it.
+
 Without Supabase configured, the app runs in local-only mode (data stays in that browser). Copy `.env.example` to `.env.local` if you want the connection baked into dev builds.
 
 ### Project layout
@@ -82,6 +85,7 @@ Without Supabase configured, the app runs in local-only mode (data stays in that
 ```
 src/lib/          plain TypeScript logic (unit-tested in lib.test.ts)
   money.ts        shares, balance, formatting
+  debits.ts       direct debits: income ratio, monthly shares, who sends whom
   recurring.ts    schedule maths (deterministic ids so two phones never duplicate)
   receipt.ts      image clean-up, Tesseract OCR, line/price parser
   categories.ts   categories, keyword auto-categorisation, learned rules

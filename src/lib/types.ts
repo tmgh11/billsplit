@@ -73,6 +73,36 @@ export interface Recurring extends Base {
   generatedUntil?: string;
 }
 
+/**
+ * How a direct debit is shared. 'income' follows the ratio of the two salaries in Settings, so it
+ * moves when a salary is updated; 'custom' is a fixed tomPct (e.g. a 70/30 mortgage).
+ */
+export type DebitSplit = 'income' | 'equal' | 'custom';
+export type DebitPeriod = 'monthly' | 'yearly';
+
+/**
+ * A household bill paid by direct debit from one person's account. Kept apart from the ledger:
+ * nothing is ever added to the balance. It only works out what each of you transfers each month.
+ */
+export interface DirectDebit extends Base {
+  kind: 'debit';
+  description: string;
+  category: string;
+  /** per `period`; yearly amounts are shown and shared per month (÷ 12) */
+  amount: number;
+  period: DebitPeriod;
+  /** whose name (and bank account) the bill is in */
+  paidBy: Person;
+  split: DebitSplit;
+  /** Tom's share (0–100) for 'custom'; ignored otherwise */
+  tomPct: number;
+  /** day of the month it goes out (1–31), if known */
+  dueDay?: number;
+  /** when the contract or deal ends, if known (YYYY-MM-DD) */
+  endDate?: string;
+  note?: string;
+}
+
 export interface Settings extends Base {
   kind: 'settings';
   names: Record<Person, string>;
@@ -81,9 +111,13 @@ export interface Settings extends Base {
   categoryRules: Record<string, string>;
   /** one-tap descriptions offered in Add expense (edited in Settings) */
   shortcuts: string[];
+  /** annual salaries (pre-tax), for direct debits split by income */
+  salaries?: Partial<Record<Person, number>>;
+  /** when the salaries were last changed (YYYY-MM-DD) */
+  salariesUpdated?: string;
 }
 
-export type Entry = Expense | Settlement | Recurring | Settings;
+export type Entry = Expense | Settlement | Recurring | DirectDebit | Settings;
 
 export const SETTINGS_ID = 'settings';
 

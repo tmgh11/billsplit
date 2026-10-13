@@ -1,4 +1,6 @@
-import { Icon, primeKeyboard } from './ui';
+import { useState } from 'react';
+import { Icon, Seg, primeKeyboard } from './ui';
+import { DirectDebitsView } from './DirectDebits';
 import { categoryById } from '../lib/categories';
 import { fmt, pctForSplit } from '../lib/money';
 import { addDays, prettyDate, today } from '../lib/dates';
@@ -6,7 +8,34 @@ import { describeFrequency, nextOccurrence } from '../lib/recurring';
 import { store, useStore } from '../lib/store';
 import type { SheetState } from '../App';
 
+type View = 'ledger' | 'debits';
+/** which half of the tab was last open (kept while the app is open) */
+let lastView: View = 'ledger';
+
 export function RecurringView({ open }: { open: (s: SheetState) => void }) {
+  const [view, setView] = useState<View>(lastView);
+  const pick = (v: View) => {
+    lastView = v;
+    setView(v);
+  };
+  return (
+    <>
+      <div className="repeat-seg">
+        <Seg
+          value={view}
+          onChange={pick}
+          options={[
+            { value: 'ledger', label: 'Added to ledger' },
+            { value: 'debits', label: 'Direct debits' },
+          ]}
+        />
+      </div>
+      {view === 'ledger' ? <LedgerRepeats open={open} /> : <DirectDebitsView open={open} />}
+    </>
+  );
+}
+
+function LedgerRepeats({ open }: { open: (s: SheetState) => void }) {
   const { recurring, settings } = useStore();
   const { names } = settings;
   const t = today();
@@ -51,7 +80,7 @@ export function RecurringView({ open }: { open: (s: SheetState) => void }) {
       {withNext.length === 0 && (
         <div className="card empty">
           <div className="big">🔁</div>
-          Set up the mortgage, bills and subscriptions once — they’ll appear in the ledger on the right day.
+          Set up subscriptions and other regular shared costs once — they’ll appear in the ledger on the right day. Bills you each pay by direct debit go under Direct debits instead.
         </div>
       )}
 

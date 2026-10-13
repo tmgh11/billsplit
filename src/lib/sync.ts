@@ -74,6 +74,10 @@ async function push(sb: SupabaseClient) {
       client_updated_at: e.updatedAt,
     }));
     const { error } = await sb.from('entries').upsert(rows, { onConflict: 'id' });
+    if (error?.message?.includes('entries_kind_check')) {
+      // a new kind of entry (e.g. direct debits) on a database set up before it existed
+      throw new Error('The database needs a one-off update: run supabase/schema.sql again in Supabase’s SQL Editor.');
+    }
     if (error) throw error;
     store.markClean(
       batch.map((e) => e.id),

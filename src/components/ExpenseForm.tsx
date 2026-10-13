@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { DateHint, Icon, Seg, Sheet, Toggle, haptic, toast } from './ui';
+import { DateHint, Icon, PctInput, Seg, Sheet, Toggle, haptic, toast } from './ui';
 import { CATEGORIES, categoryById, guessCategory, learnRule } from '../lib/categories';
 import { CURRENCIES, CURRENCY_FLAGS, rateToBase } from '../lib/fx';
 import { baseAmount, fmt, hasOddPenny, isValidAmount, parseMoney, pctForSplit, round2, shares } from '../lib/money';
@@ -620,28 +620,5 @@ export function ExpenseForm(props: Props) {
         </details>
       ) : null}
     </Sheet>
-  );
-}
-
-/**
- * A 0–100 percentage box. While you're typing it shows exactly what you typed (so "33." or "33,5"
- * isn't snapped back to "33"), and applies the number as you go; leaving it tidies the text.
- */
-function PctInput({ value, onChange, label }: { value: number; onChange: (pct: number) => void; label: string }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  return (
-    <input
-      className="input num"
-      inputMode="decimal"
-      value={draft ?? String(round2(value))}
-      onChange={(e) => {
-        setDraft(e.target.value);
-        const v = parseMoney(e.target.value);
-        onChange(Number.isFinite(v) ? Math.min(100, Math.max(0, v)) : 0);
-      }}
-      onBlur={() => setDraft(null)}
-      style={{ width: 70, minHeight: 44, padding: '6px 8px', display: 'inline-block' }}
-      aria-label={label}
-    />
   );
 }
