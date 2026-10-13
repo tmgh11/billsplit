@@ -590,6 +590,8 @@ describe('direct debits', () => {
 
   it('works out the income ratio only once both salaries are in', () => {
     expect(incomeTomPct(salaries)).toBe(60);
+    expect(incomeTomPct({ tom: 45196, nuria: 41600 })).toBe(52); // 52.07% → a whole 52/48
+    expect(incomeTomPct({ tom: 45000, nuria: 41000 })).toBe(52); // 52.33%
     expect(incomeTomPct({ tom: 60000 })).toBeNull();
     expect(incomeTomPct(undefined)).toBeNull();
   });

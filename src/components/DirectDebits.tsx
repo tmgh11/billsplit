@@ -13,7 +13,7 @@ const wholePounds = new Intl.NumberFormat('en-GB', { style: 'currency', currency
 const ratio = (tomPct: number) => `${Math.round(tomPct)}/${100 - Math.round(tomPct)}`;
 const longDate = (iso: string) =>
   new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-const pctLabel = (p: number) => `${round2(p).toFixed(1).replace(/\.0$/, '')}%`;
+const pctLabel = (p: number) => `${Math.round(p)}%`;
 
 export function DirectDebitsView({ open }: { open: (s: SheetState) => void }) {
   const { debits, settings, device } = useStore();

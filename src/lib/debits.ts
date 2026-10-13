@@ -8,12 +8,15 @@ import type { DirectDebit, Person, Settings } from './types';
 
 type Salaries = Settings['salaries'];
 
-/** Tom's share of the household income (0–100, unrounded), or null until both salaries are in. */
+/**
+ * Tom's share of the household income as a whole percentage (e.g. 52), or null until both
+ * salaries are in. Rounded so the split you see is exactly the split that's charged.
+ */
 export function incomeTomPct(salaries: Salaries): number | null {
   const tom = salaries?.tom ?? 0;
   const nuria = salaries?.nuria ?? 0;
   if (!(tom > 0) || !(nuria > 0)) return null;
-  return (tom / (tom + nuria)) * 100;
+  return Math.round((tom / (tom + nuria)) * 100);
 }
 
 /** Tom's share of this bill (0–100), or null if it's split by income and a salary is missing. */
