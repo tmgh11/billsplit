@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { DateHint, Icon, Seg, Sheet, haptic, toast } from './ui';
+import { DateHint, Icon, PctInput, Seg, Sheet, haptic, toast } from './ui';
 import { ReceiptReader, mergeParts, receiptTotals, type ParsedReceipt } from '../lib/receipt';
 import { fmt, parseMoney, round2, shares } from '../lib/money';
 import { isISODate, latestAllowedDate, today } from '../lib/dates';
@@ -113,9 +113,16 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
   const update = (id: string, patch: Partial<ReceiptItem>) =>
     setItems((list) => list.map((i) => (i.id === id ? { ...i, ...patch } : i)));
 
+  /** the last custom split picked on this receipt, offered first for the next custom item */
+  const [lastPct, setLastPct] = useState(50);
   const setOwner = (id: string, owner: Owner) => {
     haptic();
-    update(id, { owner });
+    const item = items.find((i) => i.id === id);
+    update(id, owner === 'custom' ? { owner, tomPct: item?.owner === 'custom' ? item.tomPct : lastPct } : { owner });
+  };
+  const setPct = (id: string, pct: number) => {
+    setLastPct(pct);
+    update(id, { tomPct: pct });
   };
 
   const addRow = () => {
@@ -311,9 +318,9 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
                   />
                 </div>
                 <div className="owner-btns">
-                  {(['tom', 'nuria', 'shared'] as Owner[]).map((o) => (
+                  {(['tom', 'nuria', 'shared', 'custom'] as Owner[]).map((o) => (
                     <button key={o} className={`${o} ${i.owner === o ? 'on' : ''}`} onClick={() => setOwner(i.id, o)} aria-pressed={i.owner === o}>
-                      {o === 'shared' ? 'Shared' : names[o]}
+                      {o === 'shared' ? 'Shared' : o === 'custom' ? 'Custom' : names[o]}
                     </button>
                   ))}
                   <button
@@ -324,6 +331,7 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
                     <Icon name="trash" size={17} />
                   </button>
                 </div>
+                {i.owner === 'custom' && <ItemSplit item={i} names={names} currency={currency} onPct={(p) => setPct(i.id, p)} />}
               </div>
             ))}
             {basketDiscount !== 0 && (
@@ -424,5 +432,48 @@ export function ReceiptScan({ onClose }: { onClose: () => void }) {
         </>
       )}
     </Sheet>
+  );
+}
+
+/** The Tom / Nuria percentages for one item split by a custom %, with what each pays for it. */
+function ItemSplit({
+  item,
+  names,
+  currency,
+  onPct,
+}: {
+  item: ReceiptItem;
+  names: Record<Person, string>;
+  currency: string;
+  onPct: (pct: number) => void;
+}) {
+  const pct = item.tomPct ?? 50;
+  const price = Number.isFinite(item.price) ? item.price : 0;
+  const tom = round2((price * pct) / 100);
+  return (
+    <div className="item-split">
+      <div className="inline" style={{ alignItems: 'center' }}>
+        <label className="tom">
+          {names.tom} <PctInput value={pct} onChange={onPct} label={`${names.tom} percent`} /> %
+        </label>
+        <label className="nuria" style={{ textAlign: 'right' }}>
+          <PctInput value={100 - pct} onChange={(p) => onPct(100 - p)} label={`${names.nuria} percent`} /> % {names.nuria}
+        </label>
+      </div>
+      <input
+        type="range"
+        className="slider"
+        min={0}
+        max={100}
+        step={5}
+        value={pct}
+        onChange={(e) => onPct(Number(e.target.value))}
+        aria-label="Split percentage"
+      />
+      <div className="inline text-2 num" style={{ fontSize: 13 }}>
+        <span>{fmt(tom, currency)}</span>
+        <span style={{ textAlign: 'right' }}>{fmt(round2(price - tom), currency)}</span>
+      </div>
+    </div>
   );
 }

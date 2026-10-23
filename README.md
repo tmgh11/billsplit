@@ -8,7 +8,7 @@ A small, fast web app for Tom and Nuria to split shared costs. It replaces Split
 - **Settle up.** Record a full or partial transfer in either direction.
 - **Repeating expenses.** Weekly, every 2 weeks, monthly, yearly, or a list of set dates. They're added automatically when a phone syncs, including any missed while nobody had the app open. A phone that's offline waits until it's back online, so it never re-adds something the other phone has since edited, paused or deleted.
 - **Direct debits** (Repeating → Direct debits). The mortgage, council tax and other bills that go out of one person's account by direct debit. They never touch the ledger; the screen shows what each of you sends the other each month. Each bill is split by income (the ratio of your two salaries, entered on the same screen), 50/50, or a fixed % such as 70/30. Yearly bills are shared per month.
-- **Scan receipt** (top of Add expense). Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared** on each item. The uneven totals go straight into the ledger.
+- **Scan receipt** (top of Add expense). Receipts are read on the phone with Tesseract.js, and nothing is uploaded. You can edit every line, then tap **Tom / Nuria / Shared / Custom** on each item (Custom splits that item by its own %, e.g. 70/30). A discount printed under an item, such as Tesco's Clubcard Price, is taken off that item rather than listed separately. The uneven totals go straight into the ledger.
 - **Spending.** Monthly totals, a 6-month chart and a category breakdown. You can view it for the household or for each person's share.
 - **Shortcuts.** One-tap descriptions in Add expense (Tesco, M&S, Sainsbury’s and Amazon to start with). Change them in **Settings → Add expense shortcuts**.
 - **Categories.** These are guessed from the description ("Tesco" → Groceries, "Council tax" → Bills). If you override a guess, the app learns it for next time.
@@ -65,7 +65,7 @@ Every expense has **who paid** and **whose cost it is**:
 
 The Save button always spells out the result ("Nuria owes you £12.30") before you tap it.
 
-For a receipt, the Tom items plus half the Shared items are Tom's cost, and the rest is Nuria's. It's saved as one expense with a custom split, and the item list is kept on the expense.
+For a receipt, the Tom items, half the Shared items and each Custom item's % are Tom's cost, and the rest is Nuria's. It's saved as one expense with a custom split, and the item list is kept on the expense.
 
 ## Develop locally
 

@@ -30,7 +30,10 @@ const NOT_THE_TOTAL = /sub|sav|tax|vat|net|item/i;
 const SUBTOTAL = /sub\s*-?\s*t[o0]t[a-z0-9]{1,3}/i; // also OCR'd variants like 'Subtotil'
 const PAYMENT = /visa|master\s*card|amex|contactless|\bcard\b|debit|credit|\bcash\b|apple\s*pay|google\s*pay/i;
 // Lines that adjust a price rather than being an item of their own
-const DISCOUNT = /discount|saving|clubcard|nectar|price\s*cut|multi\s*-?\s*buy|offer|promo|reduc|coupon|\bsave\b|\boff\b|deal|voucher|reward/i;
+const DISCOUNT = /discount|saving|club\s*card|nectar|price\s*cut|multi\s*-?\s*buy|offer|promo|reduc|coupon|\bsave\b|\boff\b|deal|voucher|reward/i;
+// Words that only ever label a discount (unlike "deal", as in "Meal deal"). A line with one of
+// these straight after an item is a discount even if the scanner missed its minus sign.
+const SURE_DISCOUNT = /discount|saving|club\s*card|\bcc\b|nectar\s*price|price\s*cut|reduc/i;
 
 // price at the end of a line: "1.25", "£1.25", "1,25", "-0.50", "1.25 A", "1.25*"
 const PRICE_AT_END = /(-?)\s*[£€$]?\s*(-?\d{1,5}[.,]\s?\d{2})\s*(-|[A-Z]{1,2}|\*)?\s*$/;
@@ -142,10 +145,19 @@ export function parseReceiptText(text: string): ParsedReceipt {
       printedTotal = Math.abs(price);
       continue;
     }
-    if (price < 0 && (DISCOUNT.test(name) || !hasWords(name))) {
-      if (afterSubtotal || !lastWasItem || !items.length) basketDiscount += price;
-      else items[items.length - 1].price = round2(items[items.length - 1].price + price);
-      lastWasItem = false;
+    // A discount printed under its item (Tesco's Clubcard Price, a multibuy saving) is taken off
+    // that item rather than listed on its own. A negative line is never an item, whatever it says
+    // (the scanner often mangles "Clubcard"); one that can't belong to an item comes off the basket.
+    const prev = items[items.length - 1];
+    const sureDiscount = SURE_DISCOUNT.test(name) && !afterSubtotal && lastWasItem && prev && price <= prev.price;
+    if (price < 0 || sureDiscount) {
+      const cut = -Math.abs(price);
+      if (!afterSubtotal && lastWasItem && prev && round2(prev.price + cut) >= 0) {
+        prev.price = round2(prev.price + cut); // stays the last item: a second discount on it folds in too
+      } else {
+        basketDiscount += cut;
+        lastWasItem = false;
+      }
       continue;
     }
     if (SKIP.test(name) || !hasWords(name)) {
@@ -261,22 +273,36 @@ function titleCase(s: string): string {
   return s.toLowerCase().replace(/(^|\s|-)([a-z])/g, (_, a, b) => a + b.toUpperCase());
 }
 
+/** Tom's share of one receipt item, as a percentage (0–100). */
+export function itemTomPct(i: Pick<ReceiptItem, 'owner' | 'tomPct'>): number {
+  if (i.owner === 'tom') return 100;
+  if (i.owner === 'nuria') return 0;
+  if (i.owner === 'custom') return Math.min(100, Math.max(0, i.tomPct ?? 50));
+  return 50;
+}
+
 /**
  * Totals for the review screen. A whole-basket discount is shared in proportion to what
  * each person bought (a 10% club saving takes 10% off everyone's share).
  */
 export function receiptTotals(items: ReceiptItem[], basketDiscount = 0) {
-  const t = { tom: 0, nuria: 0, shared: 0 };
-  for (const i of items) t[i.owner] += Number.isFinite(i.price) ? i.price : 0;
-  const gross = t.tom + t.nuria + t.shared;
+  const t = { tom: 0, nuria: 0, shared: 0, custom: 0 };
+  let tomGross = 0;
+  for (const i of items) {
+    const price = Number.isFinite(i.price) ? i.price : 0;
+    t[i.owner] += price;
+    tomGross += (price * itemTomPct(i)) / 100;
+  }
+  const gross = t.tom + t.nuria + t.shared + t.custom;
   const factor = gross > 0 ? (gross + basketDiscount) / gross : 1;
   const total = round2(gross + basketDiscount);
-  const tomExact = (t.tom + t.shared / 2) * factor;
+  const tomExact = tomGross * factor;
   const tomShare = round2(tomExact);
   return {
     tomOnly: round2(t.tom * factor),
     nuriaOnly: round2(t.nuria * factor),
     shared: round2(t.shared * factor),
+    custom: round2(t.custom * factor),
     total,
     tomShare,
     nuriaShare: round2(total - tomShare),

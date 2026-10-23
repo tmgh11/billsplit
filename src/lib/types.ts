@@ -5,13 +5,16 @@ export const other = (p: Person): Person => (p === 'tom' ? 'nuria' : 'tom');
 /** Who the cost belongs to. 'equal' = 50/50, 'tom'/'nuria' = entirely theirs, 'custom' = tomPct. */
 export type SplitMode = 'equal' | 'tom' | 'nuria' | 'custom';
 
-export type Owner = 'tom' | 'nuria' | 'shared';
+/** Whose a receipt item is. 'custom' splits it by the item's own tomPct (e.g. 70/30). */
+export type Owner = 'tom' | 'nuria' | 'shared' | 'custom';
 
 export interface ReceiptItem {
   id: string;
   name: string;
   price: number;
   owner: Owner;
+  /** Tom's share of this item (0–100), for owner 'custom' */
+  tomPct?: number;
 }
 
 interface Base {

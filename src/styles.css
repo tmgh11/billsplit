@@ -398,7 +398,7 @@ select.input {
 .r-top .name { flex: 1; min-width: 0; }
 .r-top .price { width: 92px; text-align: right; }
 .r-top .input { min-height: 42px; padding: 9px 11px; }
-.owner-btns { display: grid; grid-template-columns: 1fr 1fr 1fr 44px; gap: 6px; }
+.owner-btns { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 40px; gap: 5px; }
 .owner-btns button {
   min-height: 44px; border-radius: var(--radius-xs); font-size: 14px; font-weight: 650; background: var(--surface-2);
   color: var(--text-2); border: 1.5px solid transparent;
@@ -406,7 +406,11 @@ select.input {
 .owner-btns button.on.tom { background: var(--tom-soft); color: var(--tom); border-color: var(--tom); }
 .owner-btns button.on.nuria { background: var(--nuria-soft); color: var(--nuria); border-color: var(--nuria); }
 .owner-btns button.on.shared { background: var(--shared-soft); color: var(--text); border-color: var(--shared); }
+.owner-btns button.on.custom { background: var(--surface); color: var(--text); border-color: var(--ink); }
 .owner-btns .del { color: var(--muted); display: grid; place-items: center; }
+.item-split { margin-top: 8px; padding: 10px 12px 6px; border-radius: var(--radius-xs); background: var(--surface-2); }
+.item-split label { font-weight: 650; font-size: 14px; }
+.item-split .input { background: var(--surface); }
 .totals { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
 .totals div { background: var(--surface-2); border-radius: var(--radius-xs); padding: 8px 10px; font-size: 13px; color: var(--text-2); }
 .totals strong { display: block; font-size: 16px; color: var(--text); }

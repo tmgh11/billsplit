@@ -17,6 +17,7 @@ import {
 import { newId, store, useStore } from '../lib/store';
 import { other, type Expense, type Frequency, type Person, type Recurring, type SplitMode } from '../lib/types';
 import { prettyDate } from '../lib/dates';
+import { itemTomPct } from '../lib/receipt';
 
 type Props =
   | { mode: 'expense'; initial?: Expense; onClose: () => void; /** switch to scanning a receipt instead */ onScan?: () => void }
@@ -612,8 +613,13 @@ export function ExpenseForm(props: Props) {
           {init.items.map((i) => (
             <div key={i.id} className="inline" style={{ fontSize: 14, padding: '6px 0' }}>
               <span>{i.name}</span>
-              <span className={`num ${i.owner === 'shared' ? 'text-2' : i.owner}`} style={{ textAlign: 'right' }}>
-                {i.owner === 'shared' ? 'Shared' : names[i.owner]} · {fmt(i.price, init.currency)}
+              <span className={`num ${i.owner === 'shared' || i.owner === 'custom' ? 'text-2' : i.owner}`} style={{ textAlign: 'right' }}>
+                {i.owner === 'shared'
+                  ? 'Shared'
+                  : i.owner === 'custom'
+                    ? `${Math.round(itemTomPct(i))}/${100 - Math.round(itemTomPct(i))}`
+                    : names[i.owner]}{' '}
+                · {fmt(i.price, init.currency)}
               </span>
             </div>
           ))}

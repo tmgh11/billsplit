@@ -331,6 +331,71 @@ describe('icons', () => {
 });
 
 describe('receipt parsing', () => {
+  const tesco = (body: string) => parseReceiptText(`TESCO\nSuperstore\n${body}`);
+  const lines = (r: ReturnType<typeof parseReceiptText>) => r.items.map((i) => [i.name, i.price]);
+
+  it('splits a custom item by its own %, alongside shared and personal items', () => {
+    const t = receiptTotals([
+      { id: 'a', name: 'Wine', price: 10, owner: 'custom', tomPct: 70 },
+      { id: 'b', name: 'Bread', price: 2, owner: 'shared' },
+      { id: 'c', name: 'Socks', price: 5, owner: 'nuria' },
+    ]);
+    expect(t.total).toBe(17);
+    expect(t.tomShare).toBe(8); // 7 + 1
+    expect(t.nuriaShare).toBe(9); // 3 + 1 + 5
+    // a custom item with no % saved yet counts as half each
+    expect(receiptTotals([{ id: 'd', name: 'X', price: 4, owner: 'custom' }]).tomShare).toBe(2);
+  });
+
+  it('takes a Tesco Clubcard discount off the item above it, however the scanner reads the label', () => {
+    const r = tesco(`CHEDDAR 400G           3.75
+Clubcard Price        -0.75
+SEMI SKIMMED MILK 4PT  1.65
+Ciubcard Prlce       -£0.40
+BANANAS LOOSE          0.92
+Club card Price       0.20-
+SOURDOUGH              2.80
+Cc                    -0.30
+EGGS 6                 2.10
+TOTAL                  9.57`);
+    expect(lines(r)).toEqual([
+      ['Cheddar 400g', 3],
+      ['Semi Skimmed Milk 4pt', 1.25],
+      ['Bananas Loose', 0.72],
+      ['Sourdough', 2.5],
+      ['Eggs 6', 2.1],
+    ]);
+    expect(r.basketDiscount).toBe(0);
+    expect(totalsMatch(r)).toBe(true);
+  });
+
+  it('folds a discount whose minus sign was lost, but leaves a meal deal alone', () => {
+    const r = tesco(`PASTA 500G             1.20
+Clubcard Price         0.20
+MEAL DEAL              3.50
+TOTAL                  4.50`);
+    expect(lines(r)).toEqual([
+      ['Pasta 500g', 1],
+      ['Meal Deal', 3.5],
+    ]);
+  });
+
+  it('folds two discounts on one item, and sends one bigger than its item to the basket', () => {
+    const r = tesco(`WINE                   8.00
+Clubcard Price        -1.50
+Multibuy saving       -0.50
+CRISPS                 1.00
+Multibuy saving       -2.00
+TOTAL                  5.00`);
+    expect(lines(r)).toEqual([
+      ['Wine', 6],
+      ['Crisps', 1],
+    ]);
+    expect(r.basketDiscount).toBe(-2);
+    expect(totalsMatch(r)).toBe(true);
+  });
+
+
   const text = `TESCO
 Express Camden
 MILK SEMI SKIMMED 2PT   1.45
